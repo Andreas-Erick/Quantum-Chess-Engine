@@ -35,7 +35,7 @@ warn_unused_configs = true
 
 [[tool.mypy.overrides]]
 # Third-party packages without type information.
-module = ["webview.*", "PyInstaller.*", "fontTools.*"]
+module = ["webview.*", "fontTools.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]

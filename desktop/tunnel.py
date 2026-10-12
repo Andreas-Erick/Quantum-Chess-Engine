@@ -22,7 +22,7 @@ import threading
 import time
 from collections.abc import Sequence
 from pathlib import Path
-from typing import IO, Any, Optional
+from typing import IO, Any, Optional, cast
 
 PUBLIC_URL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 START_TIMEOUT = 45.0  # seconds; a quick tunnel usually takes 5 to 15
@@ -55,6 +55,7 @@ def find_cloudflared() -> Optional[str]:
 
 def install_cloudflared() -> str:
     """Install cloudflared with the system's package manager; returns its path."""
+    command: list[str]
     if sys.platform == "win32" and shutil.which("winget"):
         command = [
             "winget", "install", "--id", "Cloudflare.cloudflared", "--exact", "--silent",
@@ -131,7 +132,7 @@ def _close_with_this_process(process: subprocess.Popen) -> Any:
             job, extended_limit_information, ctypes.byref(info), ctypes.sizeof(info)
         )
         # Popen's process handle: private, but the only way to it on Windows.
-        and kernel32.AssignProcessToJobObject(job, int(process._handle))  # type: ignore[attr-defined]
+        and kernel32.AssignProcessToJobObject(job, int(cast(Any, process)._handle))
     ):
         raise TunnelError("Could not tie the internet link to the app, so it wasn't opened.")
     return job
@@ -208,7 +209,7 @@ class Tunnel:
             except subprocess.TimeoutExpired:
                 process.kill()
         job, self._job = self._job, None
-        if job:
+        if job and sys.platform == "win32":
             import ctypes
             from ctypes import wintypes
 
