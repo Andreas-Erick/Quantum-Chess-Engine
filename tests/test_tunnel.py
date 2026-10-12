@@ -87,10 +87,43 @@ def test_sharing_hosts_tunnels_once_and_stops_with_hosting(host_app, tmp_path): 
     assert desktop._share_online(command) == ADDRESS and desktop._tunnel._process is process
 
     desktop._window.url = f"{ADDRESS}/?game=abc"
-    desktop.verify_current()
+    desktop._verify_current()
     assert "You hosted this game" in desktop._window.dialogs[-1]
 
     desktop._window.url = f"{url}/"
     desktop.stop_hosting()
     assert process.poll() is not None
     assert desktop.info() == {"own_page": True, "lan_url": None, "public_url": None}
+
+
+CRASHING_APP = """
+import sys, os
+sys.path.insert(0, {root!r})
+from desktop.tunnel import Tunnel
+tunnel = Tunnel(52814, {command!r})
+tunnel.start(timeout=20)
+print(tunnel._process.pid, flush=True)
+os._exit(1)  # a crash: no cleanup runs
+"""
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows job objects")
+def test_tunnel_dies_with_a_crashed_app(tmp_path):
+    import subprocess
+    from pathlib import Path
+
+    root = str(Path(__file__).resolve().parent.parent)
+    app = tmp_path / "crashing_app.py"
+    app.write_text(CRASHING_APP.format(root=root, command=fake(tmp_path, WORKING)))
+    pid = int(subprocess.run([sys.executable, str(app)], capture_output=True, text=True).stdout)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and _running(pid):
+        time.sleep(0.2)
+    assert not _running(pid)
+
+
+def _running(pid: int) -> bool:
+    import subprocess
+
+    found = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True)
+    return f" {pid} ".encode() in found.stdout

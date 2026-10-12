@@ -7,7 +7,9 @@ import pytest
 from api.server import create_app
 from desktop.app import (
     Desktop,
+    GuestsOnly,
     JoinedGames,
+    LocalOnly,
     free_port,
     join_game,
     parse_args,
@@ -89,7 +91,7 @@ def test_network_guests_can_play_but_not_start_games(host_app, tmp_path):
     game_id = httpx.post(f"{url}/online/create", json={}).json()["game_id"]
     assert httpx.post(f"{lan}/online/join", json={"game_id": game_id}).is_success
     assert httpx.get(f"{lan}/state", params={"game_id": game_id}).is_success
-    for path in ("/init", "/init/", "/ai_move", "/online/create"):
+    for path in ("/init", "/init/", "/%69nit", "/ai_move", "/online/create", "/online/%63reate"):
         response = httpx.post(f"{lan}{path}", json={"game_id": game_id})
         assert response.status_code == 403, path
         assert "Only the host" in response.json()["detail"]
@@ -202,7 +204,7 @@ def test_host_join_play_and_verify(host_app, tmp_path):
         assert state["fairness"]["guest_seed"] == guest._joined.seed(url, game_id)
 
         guest._window.url = f"{url}/?game={game_id}"
-        guest.verify_current()
+        guest._verify_current()
         assert "still running" in guest._window.dialogs[-1]
 
         for notation, seat_token in (("b4^a6c6", host["token"]), ("a1a8", token)):
@@ -210,7 +212,7 @@ def test_host_join_play_and_verify(host_app, tmp_path):
             state = httpx.post(f"{url}/do_move", json=body).json()["state"]
         if state["winner"]:
             break
-    guest.verify_current()
+    guest._verify_current()
     assert guest._window.dialogs[-1].startswith("Fair. All 1 measurement")
 
 
@@ -218,7 +220,7 @@ def test_host_is_told_it_rolled_the_dice(host_app, tmp_path):
     app, url = host_app
     desktop = make_desktop(app, url, tmp_path)
     desktop._window.url = f"{url}/?game=whatever"
-    desktop.verify_current()
+    desktop._verify_current()
     assert "You hosted this game" in desktop._window.dialogs[-1]
 
 
@@ -228,3 +230,75 @@ def test_seat_already_taken_opens_as_spectator(host_app, tmp_path):
     httpx.post(f"{url}/online/join", json={"game_id": host["game_id"]})
     opened = join_game(f"{url}/?join={host['game_id']}", JoinedGames(tmp_path / "j.json"))
     assert opened == f"{url}/?game={host['game_id']}"
+
+
+def test_network_guests_cannot_reach_the_hosts_own_games(host_app, tmp_path):
+    app, url = host_app
+    desktop = make_desktop(app, url, tmp_path)
+    lan = "http://127.0.0.1:" + desktop.host().rsplit(":", 1)[1]
+    own = httpx.post(f"{url}/init", json={}).json()["game_id"]  # a game against the AI
+    for response in (
+        httpx.get(f"{lan}/state", params={"game_id": own}),
+        httpx.get(f"{lan}/legal_moves", params={"game_id": own}),
+        httpx.get(f"{lan}/correlations", params={"game_id": own, "square": "e2"}),
+        httpx.post(f"{lan}/do_move", json={"game_id": own, "notation": "e2e4"}),
+        httpx.post(f"{lan}/online/join", json={"game_id": own}),
+    ):
+        assert response.status_code == 404, response.request.url
+    assert httpx.get(f"{url}/state", params={"game_id": own}).json()["history"] == []
+    for path in ("/docs", "/openapi.json", "/redoc"):
+        assert httpx.get(f"{lan}{path}").status_code == 403, path
+    assert httpx.get(f"{url}/docs").is_success  # the host keeps them
+
+
+def test_live_feeds_per_game_are_capped(host_app):
+    import asyncio
+
+    import websockets
+
+    from api.server import MAX_FEEDS
+
+    app, url = host_app
+    port = free_port("127.0.0.1")
+    server = start_server("127.0.0.1", port, GuestsOnly(app))
+    game_id = httpx.post(f"{url}/online/create", json={}).json()["game_id"]
+    own = httpx.post(f"{url}/init", json={}).json()["game_id"]
+
+    async def check() -> None:
+        base = f"ws://127.0.0.1:{port}/ws?game_id="
+        feeds = [await websockets.connect(base + game_id) for _ in range(MAX_FEEDS)]
+        for feed in feeds:
+            await feed.recv()  # the snapshot: subscribed
+        extra = await websockets.connect(base + game_id)
+        with pytest.raises(websockets.ConnectionClosed) as closed:
+            await extra.recv()
+        assert closed.value.rcvd.code == 4429
+        with pytest.raises(websockets.InvalidStatus):  # refused like an unknown game
+            await websockets.connect(base + own)  # the host's own game
+        for feed in feeds:
+            await feed.close()
+
+    try:
+        asyncio.run(check())
+    finally:
+        stop_server(server)
+
+
+def test_local_server_answers_only_requests_addressed_to_it():
+    app = create_app(ui_dir=None)
+    port = free_port("127.0.0.1")
+    server = start_server("127.0.0.1", port, LocalOnly(app, port))
+    try:
+        base = f"http://127.0.0.1:{port}"
+        assert httpx.get(f"{base}/health").is_success
+        assert httpx.get(f"http://localhost:{port}/health").is_success
+        # A page on evil.example whose domain now resolves to 127.0.0.1 (DNS rebinding):
+        rebound = httpx.post(f"{base}/init", json={}, headers={"Host": f"evil.example:{port}"})
+        assert rebound.status_code == 421
+    finally:
+        stop_server(server)
+
+
+def test_pages_can_only_call_the_bridge_methods_meant_for_them():
+    public = {name for name in dir(Desktop) if not name.startswith("_")}
+    assert public == {"home", "host", "info", "join", "share_online", "stop_hosting"}
