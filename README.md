@@ -192,7 +192,13 @@ the same names: `POST /ai_move {"game_id": ..., "level": "hard"}`, and `GET /lev
 - **So is the internet.** Only **Get an internet link** makes that listener reachable from the
   internet, through a Cloudflare quick tunnel: anyone with the random address can then join or
   watch your online games, with the same limits as on your network. Cloudflare relays that
-  traffic. The tunnel closes with **Stop hosting** or when the app closes.
+  traffic. The tunnel closes with **Stop hosting** or when the app closes; on Windows it can't
+  outlive the app even if the app crashes.
+- **Guests see only online games.** Through the network listener or the tunnel, your games
+  against the AI don't exist, the API docs are off, and each game takes at most 16 live feeds.
+  Anyone holding an invite link can take the open seat, so send it only to your friend.
+- **The app's own server answers only the app.** It refuses requests addressed to any other
+  host name, so a web page can't reach it by pointing a domain at 127.0.0.1 (DNS rebinding).
 - **The window stays on known pages.** After you join, the host's page runs in your window, so
   the app keeps the window to its own pages and the games you joined, and sends it back if a page
   tries to go anywhere else. The host's page can't host, join or learn your local address.
