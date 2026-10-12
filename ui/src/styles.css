@@ -269,10 +269,19 @@ h2 {
 
 .coord {
   position: absolute;
+  z-index: 1;
   font-size: max(9px, 13cqi);
-  font-weight: 600;
-  opacity: 0.7;
+  font-weight: 700;
   pointer-events: none;
+}
+
+/* Board colours are the same in both themes, so label each square in the other square colour. */
+.square.light .coord {
+  color: var(--dark-sq);
+}
+
+.square.dark .coord {
+  color: var(--light-sq);
 }
 
 .coord.rank {

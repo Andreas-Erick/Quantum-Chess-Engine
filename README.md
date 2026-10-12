@@ -1,208 +1,245 @@
 # Quantum Chess
 
-A chess variant in which pieces can be in **superposition** (split across two squares), become
-**entangled** (one piece's position depends on another's), and **collapse** on measurement.
-Quantum state is simulated with [Cirq](https://quantumai.google/cirq). The game rules, the API and
-the AI agent are separate modules that communicate only through strict JSON schemas.
+[![CI](https://github.com/Andreas-Erick/Quantum-Chess/actions/workflows/ci.yml/badge.svg)](https://github.com/Andreas-Erick/Quantum-Chess/actions/workflows/ci.yml)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![Cirq](https://img.shields.io/badge/quantum-Cirq-6d4aff)
+![FastAPI](https://img.shields.io/badge/api-FastAPI-009688?logo=fastapi&logoColor=white)
+![React + TypeScript](https://img.shields.io/badge/ui-React%20%2B%20TypeScript-3178C6?logo=typescript&logoColor=white)
 
-## Status
+**Chess where a knight can be on two squares at once.** Pieces can split into **superposition**.
+A piece that slides past an uncertain square becomes **entangled** with it. A capture forces a
+**measurement** that collapses the board, sometimes in a chain reaction across several pieces.
+The quantum state is simulated with Google's [Cirq](https://quantumai.google/cirq). You can play
+against a Monte Carlo Tree Search AI in the browser.
 
-| Phase | Scope | State |
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img alt="The board mid-game: knights, a queen and a pawn shown at 50% on two squares each, with coloured rings marking three entanglement groups" src="docs/screenshot-light.png">
+</picture>
+
+<sub>Faded pieces with a percentage are in superposition. Squares sharing a ring colour are
+entangled. In this position, the white queen slid past the split knight on f3/h3, so it reached h5
+only if the knight is on h3 (purple). Black's c-pawn did the same past the knight on a6/c6 (teal).</sub>
+
+## Quick start
+
+```bash
+docker compose up --build
+```
+
+Open <http://localhost:8000> and play white against the AI, or open
+<http://localhost:8000/docs> for the interactive API.
+
+<details>
+<summary>Without Docker</summary>
+
+```bash
+python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+(cd ui && npm ci && npm run build)                      # optional: the UI served at /
+uvicorn api.server:app
+```
+
+</details>
+
+## Highlights
+
+- **Handles a huge state space.** A literal 64-qubit board would need 2^64 amplitudes. The engine
+  simulates only the squares whose occupancy is uncertain, and splits those into independent
+  entanglement groups. In random self-play, 25+ squares can be uncertain at once while the largest
+  group stays around 19 qubits.
+- **Real quantum mechanics, not dice rolls.** Moves are iSWAP-family unitaries, so pieces are
+  conserved by construction. Relative phase matters: a split piece whose halves moved separately
+  only partly recombines when merged.
+- **Decoupled architecture.** The engine, REST API, AI and UI communicate only through a Pydantic
+  JSON contract. The game history records every measurement outcome, so any client can rebuild
+  the exact quantum state from JSON. The remote AI client does exactly that.
+- **An AI for a game with randomness built in.** Open-loop MCTS averages over measurement
+  outcomes in proportion to their true probabilities. Progressive widening keeps the search
+  focused despite hundreds of possible splits per position.
+- **Tested hard where things are random.** 150 Python tests and 8 UI tests: perft-verified move
+  generation, forced and statistical measurement outcomes, A→B→C entanglement chains, and
+  random-play invariant checks. CI runs everything plus a Docker smoke test.
+
+## How to play
+
+Standard chess, plus three quantum moves. Notation follows Cantwell's *Quantum Chess*.
+
+| Move | Notation | What happens |
 |---|---|---|
-| 1. Classical foundation | Bitboard move generator, full rules, perft-verified | ✅ done |
-| 2. Quantum layer | Cirq integration, split / merge moves, measurement | ✅ done |
-| 3. Entanglement | Slide moves through superposed pieces, collapse chains | ✅ done |
-| 4. API & AI | FastAPI server, MCTS agent, Docker | ✅ done |
-| 5. Visualizer | React + TypeScript board showing probabilities and entanglement | ✅ done |
+| **Move** | `e2e4` | An ordinary move. A superposed piece moves *with* its uncertainty and isn't measured. |
+| **Split** | `g1^f3h3` | A piece (not a pawn) moves to two empty squares at once, 50% each. |
+| **Merge** | `f3h3^g1` | Two halves of a piece recombine. If neither half moved since the split, the piece is whole again with certainty. |
+| **Slide** | `d1h5` past an uncertain square | The piece moves only in the branches where its path is empty, so it becomes **entangled** with the blocker. |
 
-## Layout
+**Measurement.** Capturing or entering an uncertain square, or capturing *with* an uncertain piece,
+asks the board a question, and nature answers with the true probability. If the answer makes the
+move impossible (your attacker wasn't there after all), the move fails and your turn passes.
+Collapsing one square settles everything entangled with it.
 
-```
-engine/
-  bitboard.py     # square indexing, precomputed attack tables, ray-based slider attacks
-  classical.py    # ClassicalBoard: FEN, legal move generation, make/unmake, game outcomes
-  register.py     # sparse register: independent Cirq-simulated groups of uncertain squares
-  moves.py        # QuantumMove (jump / split / merge / slide), notation, iSWAP-family gates
-  measurement.py  # ProbabilityResolver: Born-rule sampling, collapse, chain reactions
-  board.py        # QuantumBoard: rules that tie the classical and quantum layers together
-api/
-  schemas.py      # Pydantic models: the JSON contract
-  server.py       # FastAPI endpoints, in-memory game store
-agent/
-  heuristics.py   # probability-weighted evaluation
-  mcts.py         # open-loop MCTS with progressive widening
-  client.py       # remote agent: plays through the REST API using only JSON
-tests/
-  test_classical.py
-  test_superposition.py
-  test_measurement.py
-  test_entanglement.py   # slides, path measurement, A->B->C collapse chains
-  test_agent.py          # heuristics, MCTS tactics, copy/replay
-  test_api.py            # endpoints, error codes, JSON replay, remote self-play
-ui/                     # React + TypeScript visualizer (Vite)
-  src/components/Board.tsx    # probabilities, entanglement rings, conditional overlays
-  src/moves.ts                # clicks -> move notation, driven by the legal-move list
-Dockerfile, docker-compose.yml
+**Winning.** There is no check: capture the enemy king. A king in superposition can survive an
+attack that misses.
+
+**In the UI,** pick Move, Split or Merge, then click squares; only squares that complete a legal
+move are highlighted. Hover an uncertain square to see how every square entangled with it depends
+on it: ● is its probability if the hovered square is occupied, ○ if it is empty.
+
+## How it works
+
+```mermaid
+flowchart LR
+    UI["React + TypeScript UI"] -- JSON --> API
+    Remote["Remote MCTS client"] -- JSON --> API
+    subgraph Server
+        API["FastAPI<br/>api/"] --> Board
+        API --> MCTS["MCTS agent<br/>agent/"]
+        MCTS --> Board
+        Board["QuantumBoard<br/>rules"] --> Classical["Bitboard move generation"]
+        Board --> Register["Sparse register<br/>Cirq state vectors"]
+        Board --> Resolver["Measurement<br/>Born rule, collapse chains"]
+    end
 ```
 
-## Classical engine
+### Engine (`engine/`)
 
-`ClassicalBoard` implements all of standard chess: castling (including through-check rules),
-en passant, under-promotion, pins, checkmate, stalemate, the fifty-move rule, threefold repetition
-and insufficient material.
+Every square has a classical **label** (the piece that would be there) and, only while uncertain,
+a qubit (`cirq.GridQubit(rank, file)`, where |1⟩ means occupied). Uncertain qubits are kept in
+**independent groups**, each with its own state vector. Groups merge (tensor product) only when a
+gate or measurement spans them, which happens when pieces actually interact. A square is factored
+back out the moment its probability returns to exactly 0 or 1.
 
-The move generator is checked with **perft**, which counts every leaf of the legal-move tree and
-compares it to published reference counts. The suite includes the five standard positions from the
-Chess Programming Wiki (for example, start position depth 4 = 197,281 and "Kiwipete" depth 3 =
-97,862). A single bug in castling, en passant or pin handling changes these numbers.
+| Move | Unitary |
+|---|---|
+| Jump | `iSWAP(source, target)` |
+| Split | `√iSWAP(source, t1)`, then `iSWAP(source, t2)` |
+| Merge | inverse of split |
+| Slide | `iSWAP(source, target)` controlled on every path square being empty |
 
-```python
-from engine.classical import ClassicalBoard
+A capture along an uncertain path makes a **path measurement**, which answers only "is the path
+clear?". If the path is blocked, the possible blockers stay uncertain, now entangled with each
+other. `QuantumBoard.joint_probability` exposes these correlations.
 
-board = ClassicalBoard()
-board.play("e2e4")
-print(board)
-print([m.uci() for m in board.legal_moves()][:5])
-```
+The classical layer is a complete bitboard chess engine (castling, en passant, promotion, pins,
+every draw rule), verified with **perft** against published node counts, for example 197,281 at
+depth 4 from the start position and 97,862 at depth 3 for "Kiwipete".
 
-## Quantum rules
+### AI (`agent/`)
+
+Minimax breaks down when every capture can branch on a random outcome. The agent uses
+**open-loop MCTS**: tree nodes are move sequences, and each iteration replays them on a fresh copy
+of the position with newly sampled measurements. The statistics on each node therefore average
+over the quantum dice.
+
+- **Progressive widening.** Captures are ordered by expected value, then ordinary and quantum
+  moves are interleaved. A node considers about 2·√visits candidates, so a queen's ~200 possible
+  splits don't drown out the good moves.
+- **Evaluation.** Material and centrality are weighted by the probability that each piece is
+  really there, minus a penalty for a king in superposition.
+- **Bounded cost.** A rollout stops and evaluates statically once an entangled group passes 12
+  qubits.
+
+### Visualizer (`ui/`)
+
+React 19, TypeScript and Vite. FastAPI serves the built app at `/`. Pieces fade with probability,
+entanglement groups share ring colours, collapsed squares flash, and the move log explains each
+measurement (`d2 occupied? (50%) → no · 6 squares collapsed`). A `?game=<id>` link opens a
+specific game.
+
+## API
+
+<details>
+<summary>Endpoints</summary>
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/init` | New game (`{fen?, seed?}`) → `GameState` |
+| `POST` | `/do_move` | `{game_id, notation}` or `{game_id, move_type, source, target1, target2?, source2?, promotion?}` |
+| `GET` | `/state?game_id=` | Pieces, 64 probabilities, entanglement groups, full history |
+| `GET` | `/legal_moves?game_id=` | All legal moves in notation |
+| `GET` | `/correlations?game_id=&square=` | Entangled squares' probabilities given that square is occupied / empty |
+| `POST` | `/ai_move` | MCTS move (`{game_id, iterations?, rollout_depth?, time_limit?, seed?}`) |
+| `GET` | `/health` | Liveness probe |
+
+Errors: `400` illegal move or bad FEN, `404` unknown game, `409` game over, `422` malformed
+payload. Every move response lists its measurements: what was asked, the prior probability, the
+outcome, and every square that collapsed.
+
+</details>
+
+<details>
+<summary>Using the engine from Python</summary>
 
 ```python
 from engine.board import QuantumBoard
 
 board = QuantumBoard()
-board.do_move("g1^f3h3")         # split: knight is 50% on f3, 50% on h3
+board.do_move("g1^f3h3")            # knight: 50% f3, 50% h3
 board.do_move("e7e5")
-result = board.do_move("f3h3^g1")  # merge: interference puts it back on g1 with certainty
+board.do_move("f3h3^g1")            # interference: back on g1 with certainty
 print(board)
-print(board.probabilities())     # 64 occupancy probabilities, a1 .. h8
+print(board.probabilities())        # 64 occupancy probabilities, a1..h8
 ```
 
-| Move | Notation | Unitary |
-|---|---|---|
-| Jump | `e2e4` | `iSWAP(src, tgt)` |
-| Split | `b1^a3c3` | `sqrt(iSWAP)(src, t1)` then `iSWAP(src, t2)` |
-| Merge | `a3c3^b1` | inverse of split |
-| Slide | `a1a5` through a superposed square | `iSWAP(src, tgt)` controlled on every path square being empty |
+</details>
 
-* All gates come from the iSWAP family, which **conserves the number of occupied squares**, so a
-  unitary can move a piece's probability around but can never create or destroy a piece.
-* **Measurement** happens only when a move needs a definite answer: capturing or entering a
-  superposed square, or capturing *with* a superposed piece. Outcomes are sampled by the Born
-  rule. Collapsing one square makes every square it was correlated with definite too, and the
-  `Measurement` event reports that chain reaction.
-* If a measurement makes the move impossible (for example, the attacker turns out not to be
-  there), the move fails but the turn still passes.
-* There is no check. You win by capturing the enemy king, and a superposed king may survive an
-  attack. En passant is not supported in quantum play. Pawns cannot split.
-* **Slides create entanglement.** A rook moving through a square that holds a knight with 50%
-  probability ends up 50% at its destination and 50% where it started, *correlated* with the
-  knight. `QuantumBoard.joint_probability` exposes these correlations.
-* A capture along an uncertain path first makes a **path measurement**, which answers only "is
-  the path clear?". If the answer is "blocked", it does not reveal which piece blocked the path:
-  the possible blockers stay in superposition, now entangled with each other.
-* **Chain reactions:** a knight on c3 *or* d2, a rook that slid a3→e3 through c3, and a queen
-  that slid e1→e5 through e3 form one entangled system. Capturing on c3 collapses all six squares
-  at once (`test_capturing_the_root_collapses_the_whole_chain`).
-* Relative phase is real: if one half of a split piece moves on its own, a later merge
-  recombines it only partially (see `test_merge_with_mismatched_phase_only_partly_recombines`).
-
-### Why not a literal 64-qubit state vector
-
-A full state vector for 64 qubits has 2^64 amplitudes, which no simulator can hold. The board
-keeps every square whose occupancy is certain on a classical label array. A square enters the
-Cirq simulation (as `GridQubit(rank, file)`) only when a quantum move touches it, and it is
-factored back out as soon as its probability returns to exactly 0 or 1.
-
-Uncertain squares are further split into **independent groups**, each with its own state vector.
-Two pieces that were split separately and never interacted cost 2^2 + 2^2 amplitudes, not 2^4.
-Groups are combined (tensor product) only when a gate or a path measurement spans them, which
-happens when pieces actually interact. In random self-play, 25+ squares are uncertain at once while
-the largest group stays near 2^19 amplitudes.
-
-## Visualizer
-
-The UI is a React + TypeScript app (`ui/`). FastAPI serves the built UI at `/`, so the
-container hosts the board and the API on one port.
-
-* Each piece is drawn with opacity proportional to its probability, plus a percentage label and
-  a probability bar.
-* Squares in the same **entanglement group** share a coloured ring. **Hovering** an uncertain
-  square shows, on every square entangled with it, its probability if the hovered square is
-  occupied (●) and if it is empty (○). For example, hovering a knight that a rook slid past
-  shows the rook's two possible squares at 100% and 0%.
-* Squares that collapse in a measurement flash, and the move log explains each measurement:
-  `d2 occupied? (50%) → no · 6 squares collapsed`.
-* Move, Split and Merge modes highlight only the squares that complete a legal move. The AI can
-  play either side at an adjustable strength. A `?game=<id>` link opens a specific game.
+<details>
+<summary>AI self-play through the API</summary>
 
 ```bash
-uvicorn api.server:app --port 8000        # terminal 1: engine + API
-cd ui && npm install && npm run dev       # terminal 2: UI with hot reload on :5173
+python -m agent.client --url http://localhost:8000 --color both                 # self-play
+python -m agent.client --url http://localhost:8000 --game-id ID --color black   # join a game
+docker compose --profile demo up --build                                        # API + self-play
 ```
 
-## REST API
+</details>
 
-```bash
-uvicorn api.server:app --reload     # interactive docs at http://localhost:8000/docs
+## Project layout
+
+<details>
+<summary>Files</summary>
+
+```
+engine/
+  bitboard.py       square indexing, attack tables, ray-based slider attacks
+  classical.py      ClassicalBoard: FEN, legal moves, make/unmake, game outcomes
+  register.py       sparse register: independent Cirq-simulated entanglement groups
+  moves.py          jump / split / merge / slide, notation, iSWAP-family gates
+  measurement.py    Born-rule sampling, collapse, chain reactions
+  board.py          QuantumBoard: ties the classical and quantum layers together
+api/
+  schemas.py        Pydantic models: the JSON contract
+  server.py         FastAPI endpoints, in-memory game store, serves the UI
+agent/
+  heuristics.py     probability-weighted evaluation
+  mcts.py           open-loop MCTS with progressive widening
+  client.py         remote agent that plays using only the API
+ui/src/
+  components/       Board (probabilities, rings, conditional overlays), MoveLog
+  moves.ts          clicks -> move notation, driven by the legal-move list
+tests/              classical, superposition, measurement, entanglement, agent, api
 ```
 
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/init` | New game (`{fen?, seed?}`), returns `GameState` |
-| `POST` | `/do_move` | `{game_id, notation}` or `{game_id, move_type, source, target1, target2?, source2?, promotion?}` |
-| `GET` | `/state?game_id=` | Pieces, 64 probabilities, entanglement groups, full history |
-| `GET` | `/legal_moves?game_id=` | All legal moves in notation |
-| `GET` | `/correlations?game_id=&square=` | Entangled squares' probabilities given that square is occupied / empty |
-| `POST` | `/ai_move` | Let the MCTS agent move (`{game_id, iterations?, rollout_depth?, time_limit?, seed?}`) |
-| `GET` | `/health` | Liveness probe |
-
-Errors: `400` illegal move or bad FEN, `404` unknown game, `409` game already over, `422`
-malformed payload. Every move response lists its measurements: what was measured, the prior
-probability, the outcome, and every square that collapsed as a result.
-
-**The history is enough to reproduce the game exactly.** Each entry stores the move and its
-measurement outcomes, so `QuantumBoard.replay` rebuilds the full quantum state from JSON alone.
-That is how the remote agent works: it is a separate process that only sees the API.
-
-## AI agent
-
-Minimax fails here: on top of the move choice, every measurement splits the game on a random
-outcome. `agent/mcts.py` uses **open-loop MCTS**. Tree nodes are move sequences, not positions,
-and every iteration replays the sequence on a fresh copy of the position with its own sampled
-measurement outcomes. Node statistics therefore average over the quantum dice in proportion to
-their true probabilities.
-
-* **Progressive widening.** A queen alone has about 200 possible splits. Moves are ordered (captures
-  by expected value first, then ordinary moves interleaved 2:1 with quantum moves), and a node
-  considers only its first ~2·√visits candidates. Without this, the agent left half of an
-  attacked queen en prise. With it, it saves the queen on every tested seed
-  (`test_saves_attacked_queen`).
-* **Rollouts** are short and capture-biased, then scored by `agent/heuristics.py`: material and
-  centrality weighted by the probability that each piece is really there, plus a penalty for a
-  king in superposition.
-* **Bounded simulation cost.** A rollout stops and evaluates statically once an entangled group
-  passes 12 qubits.
-
-```bash
-python -m agent.client --url http://localhost:8000 --color both          # self-play via the API
-python -m agent.client --url http://localhost:8000 --game-id ID --color black
-```
-
-## Docker
-
-```bash
-docker compose up --build                     # UI + API on http://localhost:8000
-docker compose --profile demo up --build      # API plus an MCTS self-play client
-```
+</details>
 
 ## Development
 
 ```bash
-python -m venv .venv
-.venv/Scripts/activate          # Windows; use `source .venv/bin/activate` elsewhere
 pip install -r requirements-dev.txt
-pytest -q
+pytest -q                                   # 150 tests, ~10 s
 black --check . && flake8
 cd ui && npm ci && npm test && npm run build
+cd ui && npm run dev                        # UI with hot reload on :5173 (proxies to :8000)
 ```
+
+## Limitations and next steps
+
+- The AI plays legal, sensible moves but is weak at default strength. Stronger evaluation or more
+  iterations would help.
+- En passant is not available in quantum play, and pawns cannot split.
+- Games are stored in memory; a restart clears them. Redis or a database would make the API
+  stateless.
+
+## Acknowledgements
+
+The move set and notation follow Chris Cantwell's *Quantum Chess*. The quantum simulation uses
+[Cirq](https://quantumai.google/cirq).
