@@ -55,4 +55,25 @@ describe("App with a superposed knight", () => {
     expect(screen.getByRole("radio", { name: "Hard" }).getAttribute("aria-checked")).toBe("true");
     expect(localStorage.getItem("quantum-chess:level")).toBe("hard");
   });
+
+  it("marks where a picked piece can go with its own element, not the square's ::before", async () => {
+    // The last-move highlight uses ::before; a target dot sharing it was pinned to the corner.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url.startsWith("/state")) return json({ ...split.state, turn: "white" });
+        if (url.startsWith("/legal_moves")) return json({ moves: ["b1a3", "b1c3", "e2e4"] });
+        if (url.startsWith("/levels")) return json(levels);
+        return new Promise(() => {});
+      }),
+    );
+    await act(async () => {
+      render(<App />);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /^b1 / }));
+    for (const name of ["a3", "c3"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`^${name}$`) }).querySelector(".hint")).not.toBeNull();
+    }
+    expect(screen.getByRole("button", { name: /^e4$/ }).querySelector(".hint")).toBeNull();
+  });
 });
