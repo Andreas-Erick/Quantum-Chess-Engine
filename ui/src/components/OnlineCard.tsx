@@ -21,7 +21,7 @@ interface OnlineCardProps {
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
 
 export function inviteLink(gameId: string, base?: string | null): string {
-  const root = base ? base.replace(/\/$/, "") + "/" : `${window.location.origin}${window.location.pathname}`;
+  const root = base ? `${base.replace(/\/$/, "")}/` : `${window.location.origin}${window.location.pathname}`;
   return `${root}?join=${encodeURIComponent(gameId)}`;
 }
 
@@ -44,7 +44,9 @@ export function OnlineCard({
   const [joinLink, setJoinLink] = useState("");
   const hosting = !!desktop?.ownPage;
   const back = desktop && !desktop.ownPage && (
-    <button onClick={() => void desktop.api.home()}>Back to my games</button>
+    <button type="button" onClick={() => void desktop.api.home()}>
+      Back to my games
+    </button>
   );
   const hostingNote = hosting && desktop.lanUrl && (
     <div className="hosting">
@@ -61,7 +63,7 @@ export function OnlineCard({
         )}
       </p>
       <div className="buttons">
-        <button onClick={onStopHosting} disabled={busy}>
+        <button type="button" onClick={onStopHosting} disabled={busy}>
           Stop hosting
         </button>
       </div>
@@ -93,7 +95,7 @@ export function OnlineCard({
               </select>
             </label>
             <div className="buttons">
-              <button className="primary" onClick={() => onCreate(color)} disabled={busy}>
+              <button type="button" className="primary" onClick={() => onCreate(color)} disabled={busy}>
                 {hosting ? "Host a game" : "Create invite link"}
               </button>
             </div>
@@ -140,14 +142,13 @@ export function OnlineCard({
   return (
     <section className="card" aria-label="Online game">
       <h2>
-        Online game{" "}
-        <span className={`live ${connected ? "on" : ""}`}>{connected ? "● live" : "○ reconnecting…"}</span>
+        Online game <span className={`live ${connected ? "on" : ""}`}>{connected ? "● live" : "○ reconnecting…"}</span>
       </h2>
       <p>
         {seat ? (
           <>
-            You play <span className={`dot ${seat.color}`} /> <strong>{seat.color === "white" ? "White" : "Black"}</strong>
-            .
+            You play <span className={`dot ${seat.color}`} />{" "}
+            <strong>{seat.color === "white" ? "White" : "Black"}</strong>.
           </>
         ) : (
           "You are watching this game."
@@ -158,18 +159,21 @@ export function OnlineCard({
         <>
           <div className="invite">
             <input readOnly value={link} aria-label="Invite link" onFocus={(e) => e.target.select()} />
-            <button onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</button>
+            <button type="button" onClick={() => void copy()}>
+              {copied ? "Copied" : "Copy"}
+            </button>
           </div>
           {hosting && desktop.publicUrl ? (
             <p className="muted small">This link works from anywhere while the app is open.</p>
           ) : hosting ? (
             <>
               <p className="muted small">
-                This link works for a friend on the same network. If they can't connect, allow Quantum Chess Engine through
-                your firewall, on private networks only.
+                This link works for a friend on the same network. If they can't connect, allow Quantum Chess Engine
+                through your firewall, on private networks only.
               </p>
               <div className="buttons">
                 <button
+                  type="button"
                   onClick={() => {
                     setSharing(true);
                     void onShareOnline().finally(() => setSharing(false));
@@ -213,8 +217,8 @@ export function OnlineCard({
             </>
           ) : (
             <>
-              Fair dice: both players seeded them, and the server's share ({short(fairness.commitment)}) was fixed before
-              anyone joined. It is revealed when the game ends.
+              Fair dice: both players seeded them, and the server's share ({short(fairness.commitment)}) was fixed
+              before anyone joined. It is revealed when the game ends.
             </>
           )}
         </p>

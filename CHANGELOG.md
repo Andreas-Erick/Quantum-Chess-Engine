@@ -12,6 +12,9 @@ are taken from its section here (see CONTRIBUTING.md, *Releasing*).
 - `scripts/bump_version.py` sets the version everywhere at once; a test checks that every copy
   agrees.
 - Issue and pull request templates, `.editorconfig` and `.gitattributes`.
+- Quality gates in CI: Ruff (lint and format, replacing black and flake8), mypy, a coverage floor
+  of 85%, and Biome for the UI (lint and format). Python 3.13 and 3.14 are tested too. A
+  pre-commit configuration runs the same checks before each commit.
 
 ### Changed
 - Dependabot groups minor and patch updates into one weekly pull request per ecosystem.
@@ -19,6 +22,9 @@ are taken from its section here (see CONTRIBUTING.md, *Releasing*).
 
 ### Fixed
 - The API reported version 0.6.0; it now reports the release version.
+- The move log's colour dots are announced by screen readers.
+- All 60 type errors mypy found. They were no bugs at runtime, but they hid the engine's
+  assumptions, e.g. that a split always has two targets (now `QuantumMove.split_targets`).
 - Links point at the renamed repository (`Quantum-Chess-Engine`).
 
 ## [0.8.2] - 2026-10-12

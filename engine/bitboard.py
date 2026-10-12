@@ -6,7 +6,8 @@ A bitboard is a Python ``int`` whose bit ``n`` is set when square ``n`` is in th
 
 from __future__ import annotations
 
-from typing import Iterator
+from collections.abc import Iterator
+from typing import Literal
 
 FULL = (1 << 64) - 1
 
@@ -14,7 +15,8 @@ FILE_NAMES = "abcdefgh"
 RANK_NAMES = "12345678"
 
 WHITE, BLACK = 0, 1
-COLOR_NAMES = ("white", "black")
+ColorName = Literal["white", "black"]
+COLOR_NAMES: tuple[ColorName, ColorName] = ("white", "black")
 
 PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING = range(6)
 PIECE_SYMBOLS = "pnbrqk"
@@ -173,7 +175,7 @@ BETWEEN = _between_table()
 
 def to_string(bb: int) -> str:
     """Render a bitboard as an 8x8 grid (rank 8 at the top), for debugging."""
-    rows = []
-    for r in range(7, -1, -1):
-        rows.append(" ".join("1" if bb & bit(square(f, r)) else "." for f in range(8)))
+    rows = (
+        " ".join("1" if bb & bit(square(f, r)) else "." for f in range(8)) for r in range(7, -1, -1)
+    )
     return "\n".join(rows)

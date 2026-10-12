@@ -37,8 +37,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-const post = <T>(path: string, body: unknown) =>
-  request<T>(path, { method: "POST", body: JSON.stringify(body) });
+const post = <T>(path: string, body: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body) });
 
 export const api = {
   init: (fen?: string) => post<GameState>("/init", fen ? { fen } : {}),
@@ -52,9 +51,7 @@ export const api = {
   aiMove: (gameId: string, level: LevelName) => post<AIMoveResponse>("/ai_move", { game_id: gameId, level }),
   levels: () => request<LevelInfo[]>("/levels"),
   correlations: (gameId: string, square: string) =>
-    request<Correlations>(
-      `/correlations?game_id=${encodeURIComponent(gameId)}&square=${encodeURIComponent(square)}`,
-    ),
+    request<Correlations>(`/correlations?game_id=${encodeURIComponent(gameId)}&square=${encodeURIComponent(square)}`),
 };
 
 /** The live-feed WebSocket URL for a game, on the same host that serves the page. */

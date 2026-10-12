@@ -11,7 +11,7 @@ out and handed back to the classical board as soon as its occupancy is certain a
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 import cirq
 import numpy as np
@@ -25,7 +25,9 @@ def square_qubit(sq: int) -> cirq.GridQubit:
     return cirq.GridQubit(rank_of(sq), file_of(sq))
 
 
-def qubit_square(qubit: cirq.GridQubit) -> int:
+def qubit_square(qubit: cirq.Qid) -> int:
+    if not isinstance(qubit, cirq.GridQubit):
+        raise TypeError(f"squares are GridQubits, not {qubit!r}")
     return qubit.row * 8 + qubit.col
 
 
@@ -52,7 +54,7 @@ class QuantumRegister:
         self.circuit = cirq.Circuit()
         self._measurement_count = 0
 
-    def copy(self) -> "QuantumRegister":
+    def copy(self) -> QuantumRegister:
         """An independent copy of the quantum state (the circuit log is not copied)."""
         clone = QuantumRegister()
         for group in self._groups:
@@ -120,7 +122,10 @@ class QuantumRegister:
             axes=range(len(group.squares)),
         )
         qubits = [square_qubit(sq) for sq in group.squares]
-        group.state = cirq.apply_unitaries(circuit.all_operations(), qubits, args).reshape(-1)
+        result = cirq.apply_unitaries(circuit.all_operations(), qubits, args, default=None)
+        if result is None:
+            raise ValueError("every operation must have a unitary (moves are iSWAP-family gates)")
+        group.state = result.reshape(-1)
         self.circuit += circuit
 
     def probability(self, sq: int) -> float:
@@ -134,7 +139,7 @@ class QuantumRegister:
         mask = np.ones([2] * len(group.squares), dtype=bool)
         for sq in squares:
             axis = group.squares.index(sq)
-            index = [slice(None)] * mask.ndim
+            index: list[slice | int] = [slice(None)] * mask.ndim
             index[axis] = 1
             mask[tuple(index)] = False
         return mask
@@ -158,7 +163,7 @@ class QuantumRegister:
             group = self._group_of[sq]
             by_group.setdefault(id(group), (group, {}))[1][sq] = occupied
         for group, members in by_group.values():
-            index = [slice(None)] * len(group.squares)
+            index: list[slice | int] = [slice(None)] * len(group.squares)
             for sq, occupied in members.items():
                 index[group.squares.index(sq)] = int(occupied)
             probability *= float(group.weights()[tuple(index)].sum())

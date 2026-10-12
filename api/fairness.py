@@ -86,7 +86,8 @@ def verify(state: dict, my_seed: Optional[str] = None) -> Verdict:
     if my_seed is not None and my_seed != guest_seed:
         return Verdict(False, "The server used a different seed from the one you sent.")
 
-    board = QuantumBoard(state["initial_fen"], rng=SeededDice(secret, guest_seed))
+    dice = SeededDice(secret, guest_seed)
+    board = QuantumBoard(state["initial_fen"], rng=dice)
     for ply, entry in enumerate(state["history"], start=1):
         try:
             result = board.do_move(entry["notation"])
@@ -98,7 +99,7 @@ def verify(state: dict, my_seed: Optional[str] = None) -> Verdict:
                 f"Move {ply} ({entry['notation']}): the dice say {result.outcomes}, "
                 f"but the game recorded {entry['outcomes']}.",
             )
-    rolls = board.resolver.rng.rolls
+    rolls = dice.rolls
     if my_seed is None:
         return Verdict(
             True,

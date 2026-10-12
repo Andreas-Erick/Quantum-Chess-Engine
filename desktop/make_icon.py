@@ -91,8 +91,10 @@ def png(size: int = SIZE, margin: float = 0.0) -> Image.Image:
     gradient = Image.new("RGB", (1, 256))
     for y in range(256):
         t = y / 255
-        gradient.putpixel((0, y), tuple(round(a + (b - a) * t) for a, b in zip(TOP, BOTTOM)))
-    tile = gradient.resize((inner, inner), Image.BILINEAR).convert("RGBA")
+        gradient.putpixel(
+            (0, y), tuple(round(a + (b - a) * t) for a, b in zip(TOP, BOTTOM, strict=True))
+        )
+    tile = gradient.resize((inner, inner), Image.Resampling.BILINEAR).convert("RGBA")
     mask = Image.new("L", (inner, inner), 0)
     ImageDraw.Draw(mask).rounded_rectangle(
         (0, 0, inner - 1, inner - 1), radius=RADIUS * inner, fill=255
@@ -100,15 +102,15 @@ def png(size: int = SIZE, margin: float = 0.0) -> Image.Image:
     tile.putalpha(mask)
 
     knights = knight_masks(inner)
-    for knight_mask, opacity in zip(knights, (GHOST_OPACITY, 1.0)):
+    for knight_mask, opacity in zip(knights, (GHOST_OPACITY, 1.0), strict=True):
         white = Image.new("RGBA", (inner, inner), (255, 255, 255, 0))
-        white.putalpha(knight_mask.point(lambda v: round(v * opacity)))
+        white.putalpha(knight_mask.point(lambda v, opacity=opacity: round(v * opacity)))
         tile = Image.alpha_composite(tile, white)
     tile.putalpha(ImageChops.multiply(tile.getchannel("A"), mask))
 
     canvas = Image.new("RGBA", (big, big), (0, 0, 0, 0))
     canvas.paste(tile, (offset, offset))
-    return canvas.resize((size, size), Image.LANCZOS)
+    return canvas.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def knight_masks(size: int) -> list[Image.Image]:
@@ -154,9 +156,11 @@ def flatten_qcurve(start, points, steps: int = 16):
     *offs, end = points
     if not offs:
         return [end]
-    ons = [((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for a, b in zip(offs, offs[1:])] + [end]
+    ons = [((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for a, b in zip(offs, offs[1:], strict=False)] + [
+        end
+    ]
     out, p0 = [], start
-    for c, p2 in zip(offs, ons):
+    for c, p2 in zip(offs, ons, strict=True):
         for i in range(1, steps + 1):
             t = i / steps
             out.append(
@@ -173,7 +177,7 @@ def flatten_cubic(p0, c1, c2, p3, steps: int = 16):
     return [
         tuple(
             (1 - t) ** 3 * a + 3 * (1 - t) ** 2 * t * b + 3 * (1 - t) * t * t * c + t**3 * d
-            for a, b, c, d in zip(p0, c1, c2, p3)
+            for a, b, c, d in zip(p0, c1, c2, p3, strict=True)
         )
         for t in (i / steps for i in range(1, steps + 1))
     ]
