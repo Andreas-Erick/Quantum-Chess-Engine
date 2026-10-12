@@ -32,6 +32,8 @@ function store(gameId: string) {
   }
 }
 
+const isOver = (state: GameState) => !!state.winner || !!state.draw_reason;
+
 function entriesFromHistory(state: GameState): LogEntry[] {
   return state.history.map((h, i) => ({
     ply: i,
@@ -100,7 +102,7 @@ export default function App() {
   }, [newGame]);
 
   useEffect(() => {
-    if (!gameId || !state || state.winner) {
+    if (!gameId || !state || isOver(state)) {
       setLegal([]);
       return;
     }
@@ -172,12 +174,12 @@ export default function App() {
 
   // Let the AI answer automatically when it is its turn.
   useEffect(() => {
-    if (state && !state.winner && !busy && aiColor === state.turn) {
+    if (state && !isOver(state) && !busy && aiColor === state.turn) {
       void aiMove();
     }
   }, [state, busy, aiColor, aiMove]);
 
-  const humanTurn = !!state && !state.winner && state.turn !== aiColor && !busy;
+  const humanTurn = !!state && !isOver(state) && state.turn !== aiColor && !busy;
   const selectable = useMemo(
     () => (humanTurn ? nextSquares(mode, picked, legal) : new Set<string>()),
     [humanTurn, mode, picked, legal],
@@ -212,6 +214,7 @@ export default function App() {
       .catch(() => setCorrelations(null));
   };
 
+  const checkSquares = Object.entries(state?.check ?? {});
   const last = log.length ? parseMove(log[log.length - 1].notation) : null;
   const counts = useMemo(() => {
     const result: Record<Mode, number> = { jump: 0, split: 0, merge: 0 };
@@ -246,11 +249,20 @@ export default function App() {
         <div className="status" role="status">
           {state.winner ? (
             <strong className="winner">{state.winner === "white" ? "White" : "Black"} captured the king and wins.</strong>
+          ) : state.draw_reason ? (
+            <strong className="winner">Draw by {state.draw_reason}.</strong>
           ) : busy && aiColor === state.turn ? (
             <span>AI is thinking…</span>
           ) : (
             <span>
               <span className={`dot ${state.turn}`} /> {state.turn === "white" ? "White" : "Black"} to move
+              {checkSquares.length > 0 && (
+                <strong className="check-warning">
+                  {" "}
+                  · Check! King attackable on{" "}
+                  {checkSquares.map(([sq, p]) => (p < 1 ? `${sq} (${Math.round(p * 100)}%)` : sq)).join(", ")}
+                </strong>
+              )}
               {picked.length > 0 && <span className="muted"> · picked {picked.join(", ")}</span>}
             </span>
           )}
@@ -316,7 +328,7 @@ export default function App() {
             <span className="muted num">{iterations}</span>
           </label>
           <div className="buttons">
-            <button onClick={() => void aiMove()} disabled={busy || !!state.winner}>
+            <button onClick={() => void aiMove()} disabled={busy || isOver(state)}>
               AI move now
             </button>
             <button onClick={() => setFlipped(!flipped)}>Flip board</button>
@@ -346,8 +358,13 @@ export default function App() {
               )}
               . Hover one to see how the others depend on it: ● if it is there, ○ if it is not.
             </li>
+            <li>A split piece can split again (50% → 25% + 25%), but no part can drop below 25%.</li>
             <li>Capturing or entering an uncertain square measures it. Flashing squares just collapsed.</li>
-            <li>No check: capture the enemy king to win.</li>
+            <li>
+              Capture the enemy king to win. A red king square is in <em>check</em>: the opponent could try to
+              capture it next move.
+            </li>
+            <li>Draw after 50 moves each without a pawn move, capture or measurement, or when only kings remain.</li>
           </ul>
         </details>
       </aside>

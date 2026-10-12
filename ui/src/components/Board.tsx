@@ -55,6 +55,7 @@ export function Board(props: BoardProps) {
               picked.includes(sq) ? "picked" : "",
               lastMove.includes(sq) ? "last" : "",
               flashing.has(sq) ? "flash" : "",
+              sq in state.check ? "check" : "",
               correlations?.square === sq ? "hovered" : "",
             ];
             return (

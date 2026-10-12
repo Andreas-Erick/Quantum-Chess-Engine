@@ -35,6 +35,8 @@ def evaluate(board: QuantumBoard, color: int = WHITE) -> float:
     """Score in pawns from ``color``'s point of view; +/-WIN_SCORE once the game is decided."""
     if board.winner is not None:
         return WIN_SCORE if board.winner == color else -WIN_SCORE
+    if board.draw_reason is not None:
+        return 0.0
 
     score = 0.0
     for sq, piece in enumerate(board.labels):
@@ -58,4 +60,6 @@ def win_probability(board: QuantumBoard, color: int = WHITE) -> float:
     """Map :func:`evaluate` onto [0, 1] for use as an MCTS reward."""
     if board.winner is not None:
         return 1.0 if board.winner == color else 0.0
+    if board.draw_reason is not None:
+        return 0.5
     return 0.5 + 0.5 * math.tanh(evaluate(board, color) / SCORE_SCALE)

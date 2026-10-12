@@ -38,7 +38,7 @@ def test_split_piece_counts_by_probability():
 
 
 def test_uncertain_king_is_penalised():
-    board = QuantumBoard("4k3/8/8/8/8/8/8/4K3 w - - 0 1")
+    board = QuantumBoard("4k3/p7/8/8/8/8/P7/4K3 w - - 0 1")
     before = evaluate(board, WHITE)
     board.do_move("e1^d1f1")
     assert evaluate(board, WHITE) < before

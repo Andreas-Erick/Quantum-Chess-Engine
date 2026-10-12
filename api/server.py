@@ -90,6 +90,9 @@ def serialize_state(game_id: str, board: QuantumBoard) -> GameState:
         initial_fen=board.initial_fen,
         turn=COLOR_NAMES[board.turn],
         winner=COLOR_NAMES[board.winner] if board.winner is not None else None,
+        draw_reason=board.draw_reason,
+        check={square_name(sq): p for sq, p in board.king_threats().items()},
+        halfmove_clock=board.halfmove_clock,
         probabilities=board.probabilities(),
         pieces=pieces,
         entanglement_groups=[[square_name(s) for s in g] for g in board.register.groups],
@@ -207,7 +210,7 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
     def do_move(request: MoveRequest) -> MoveResponse:
         game = store.get(request.game_id)
         with game.lock:
-            if game.board.winner is not None:
+            if game.board.is_over:
                 raise HTTPException(status_code=409, detail="the game is over")
             try:
                 result = game.board.do_move(request.to_notation())
@@ -219,7 +222,7 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
     def ai_move(request: AIMoveRequest) -> AIMoveResponse:
         game = store.get(request.game_id)
         with game.lock:
-            if game.board.winner is not None:
+            if game.board.is_over:
                 raise HTTPException(status_code=409, detail="the game is over")
             agent = MCTSAgent(
                 iterations=request.iterations,

@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/Andreas-Erick/Quantum-Chess/actions/workflows/ci.yml/badge.svg)](https://github.com/Andreas-Erick/Quantum-Chess/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Cirq](https://img.shields.io/badge/quantum-Cirq-6d4aff)
 ![FastAPI](https://img.shields.io/badge/api-FastAPI-009688?logo=fastapi&logoColor=white)
 ![React + TypeScript](https://img.shields.io/badge/ui-React%20%2B%20TypeScript-3178C6?logo=typescript&logoColor=white)
@@ -57,7 +58,7 @@ uvicorn api.server:app
 - **An AI for a game with randomness built in.** Open-loop MCTS averages over measurement
   outcomes in proportion to their true probabilities. Progressive widening keeps the search
   focused despite hundreds of possible splits per position.
-- **Tested hard where things are random.** 150 Python tests and 8 UI tests: perft-verified move
+- **Tested hard where things are random.** 165 Python tests and 8 UI tests: perft-verified move
   generation, forced and statistical measurement outcomes, A→B→C entanglement chains, and
   random-play invariant checks. CI runs everything plus a Docker smoke test.
 
@@ -68,7 +69,7 @@ Standard chess, plus three quantum moves. Notation follows Cantwell's *Quantum C
 | Move | Notation | What happens |
 |---|---|---|
 | **Move** | `e2e4` | An ordinary move. A superposed piece moves *with* its uncertainty and isn't measured. |
-| **Split** | `g1^f3h3` | A piece (not a pawn) moves to two empty squares at once, 50% each. |
+| **Split** | `g1^f3h3` | A piece (not a pawn) moves to two empty squares at once, 50% each. A split piece can split again (50% → 25% + 25%), but no part may drop below 25%. |
 | **Merge** | `f3h3^g1` | Two halves of a piece recombine. If neither half moved since the split, the piece is whole again with certainty. |
 | **Slide** | `d1h5` past an uncertain square | The piece moves only in the branches where its path is empty, so it becomes **entangled** with the blocker. |
 
@@ -77,8 +78,12 @@ asks the board a question, and nature answers with the true probability. If the 
 move impossible (your attacker wasn't there after all), the move fails and your turn passes.
 Collapsing one square settles everything entangled with it.
 
-**Winning.** There is no check: capture the enemy king. A king in superposition can survive an
-attack that misses.
+**Winning.** Capture the enemy king. A king in superposition can survive an attack that misses.
+There is no checkmate, but the board warns about **check**: any square your king may be on that an
+enemy piece could try to capture next move is outlined in red.
+
+**Draws.** A game is drawn after 50 moves each with no pawn move, capture or measurement, or when
+only the two kings are left.
 
 **In the UI,** pick Move, Split or Merge, then click squares; only squares that complete a legal
 move are highlighted. Hover an uncertain square to see how every square entangled with it depends
@@ -225,7 +230,7 @@ tests/              classical, superposition, measurement, entanglement, agent, 
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                                   # 150 tests, ~10 s
+pytest -q                                   # 165 tests, ~10 s
 black --check . && flake8
 cd ui && npm ci && npm test && npm run build
 cd ui && npm run dev                        # UI with hot reload on :5173 (proxies to :8000)
@@ -243,3 +248,7 @@ cd ui && npm run dev                        # UI with hot reload on :5173 (proxi
 
 The move set and notation follow Chris Cantwell's *Quantum Chess*. The quantum simulation uses
 [Cirq](https://quantumai.google/cirq).
+
+## License
+
+[MIT](LICENSE) © 2026 Andreas Erick

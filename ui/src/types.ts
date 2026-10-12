@@ -30,6 +30,10 @@ export interface GameState {
   initial_fen: string;
   turn: Color;
   winner: Color | null;
+  draw_reason: string | null;
+  /** Squares where the mover's king may be that the opponent could capture next move. */
+  check: Record<string, number>;
+  halfmove_clock: number;
   probabilities: number[];
   pieces: PieceInfo[];
   entanglement_groups: string[][];
