@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Optional, Protocol
 
@@ -43,17 +44,28 @@ class ProbabilityResolver:
 
     def __init__(self, rng: Optional[RandomSource] = None) -> None:
         self.rng = rng if rng is not None else np.random.default_rng()
+        # Outcomes to use instead of sampling, consumed in order. Used to replay a recorded
+        # game exactly (see QuantumBoard.replay).
+        self.forced: deque[bool] = deque()
+
+    def _outcome(self, probability: float) -> bool:
+        if not self.forced:
+            return self.rng.random() < probability
+        outcome = self.forced.popleft()
+        if (outcome and probability <= 0) or (not outcome and probability >= 1):
+            raise ValueError("forced measurement outcome is impossible in this position")
+        return outcome
 
     def measure(self, register: QuantumRegister, sq: int) -> Measurement:
         p = register.probability(sq)
-        occupied = self.rng.random() < p
+        occupied = self._outcome(p)
         register.project(sq, occupied)
         collapsed = register.release_definite()
         return Measurement(sq, p, occupied, collapsed)
 
     def measure_path(self, register: QuantumRegister, path: list[int]) -> PathMeasurement:
         p = register.probability_all_empty(path)
-        clear = self.rng.random() < p
+        clear = self._outcome(p)
         register.project_all_empty(path, clear)
         collapsed = register.release_definite()
         return PathMeasurement(tuple(path), p, clear, collapsed)

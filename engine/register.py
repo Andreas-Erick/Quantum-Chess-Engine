@@ -52,6 +52,16 @@ class QuantumRegister:
         self.circuit = cirq.Circuit()
         self._measurement_count = 0
 
+    def copy(self) -> "QuantumRegister":
+        """An independent copy of the quantum state (the circuit log is not copied)."""
+        clone = QuantumRegister()
+        for group in self._groups:
+            new = _Group(list(group.squares), group.state.copy())
+            clone._groups.append(new)
+            for sq in new.squares:
+                clone._group_of[sq] = new
+        return clone
+
     def __contains__(self, sq: int) -> bool:
         return sq in self._group_of
 

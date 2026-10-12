@@ -1,0 +1,15 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+
+  # MCTS self-play through the REST API: `docker compose --profile demo up`
+  agent:
+    build: .
+    profiles: ["demo"]
+    command: ["python", "-m", "agent.client", "--url", "http://api:8000", "--color", "both",
+              "--iterations", "200", "--max-moves", "80"]
+    depends_on:
+      api:
+        condition: service_healthy

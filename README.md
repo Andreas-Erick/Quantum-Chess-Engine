@@ -12,7 +12,8 @@ the AI agent are separate modules that communicate only through strict JSON sche
 | 1. Classical foundation | Bitboard move generator, full rules, perft-verified | ✅ done |
 | 2. Quantum layer | Cirq integration, split / merge moves, measurement | ✅ done |
 | 3. Entanglement | Slide moves through superposed pieces, collapse chains | ✅ done |
-| 4. API & AI | FastAPI server, MCTS agent, Docker | ⏳ next |
+| 4. API & AI | FastAPI server, MCTS agent, Docker | ✅ done |
+| 5. Visualizer | Browser UI showing probabilities and entanglement | ⬜ next |
 
 ## Layout
 
@@ -24,13 +25,21 @@ engine/
   moves.py        # QuantumMove (jump / split / merge / slide), notation, iSWAP-family gates
   measurement.py  # ProbabilityResolver: Born-rule sampling, collapse, chain reactions
   board.py        # QuantumBoard: rules that tie the classical and quantum layers together
-api/              # FastAPI wrapper (Phase 4)
-agent/            # MCTS agent (Phase 4)
+api/
+  schemas.py      # Pydantic models: the JSON contract
+  server.py       # FastAPI endpoints, in-memory game store
+agent/
+  heuristics.py   # probability-weighted evaluation
+  mcts.py         # open-loop MCTS with progressive widening
+  client.py       # remote agent: plays through the REST API using only JSON
 tests/
   test_classical.py
   test_superposition.py
   test_measurement.py
   test_entanglement.py   # slides, path measurement, A->B->C collapse chains
+  test_agent.py          # heuristics, MCTS tactics, copy/replay
+  test_api.py            # endpoints, error codes, JSON replay, remote self-play
+Dockerfile, docker-compose.yml
 ```
 
 ## Classical engine
@@ -107,6 +116,60 @@ Two pieces that were split separately and never interacted cost 2^2 + 2^2 amplit
 Groups are combined (tensor product) only when a gate or a path measurement spans them, which
 happens when pieces actually interact. In random self-play, 25+ squares are uncertain at once while
 the largest group stays near 2^19 amplitudes.
+
+## REST API
+
+```bash
+uvicorn api.server:app --reload     # interactive docs at http://localhost:8000/docs
+```
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/init` | New game (`{fen?, seed?}`), returns `GameState` |
+| `POST` | `/do_move` | `{game_id, notation}` or `{game_id, move_type, source, target1, target2?, source2?, promotion?}` |
+| `GET` | `/state?game_id=` | Pieces, 64 probabilities, entanglement groups, full history |
+| `GET` | `/legal_moves?game_id=` | All legal moves in notation |
+| `POST` | `/ai_move` | Let the MCTS agent move (`{game_id, iterations?, rollout_depth?, time_limit?, seed?}`) |
+| `GET` | `/health` | Liveness probe |
+
+Errors: `400` illegal move or bad FEN, `404` unknown game, `409` game already over, `422`
+malformed payload. Every move response lists its measurements: what was measured, the prior
+probability, the outcome, and every square that collapsed as a result.
+
+**The history is enough to reproduce the game exactly.** Each entry stores the move and its
+measurement outcomes, so `QuantumBoard.replay` rebuilds the full quantum state from JSON alone.
+That is how the remote agent works: it is a separate process that only sees the API.
+
+## AI agent
+
+Minimax fails here: on top of the move choice, every measurement splits the game on a random
+outcome. `agent/mcts.py` uses **open-loop MCTS**. Tree nodes are move sequences, not positions,
+and every iteration replays the sequence on a fresh copy of the position with its own sampled
+measurement outcomes. Node statistics therefore average over the quantum dice in proportion to
+their true probabilities.
+
+* **Progressive widening.** A queen alone has about 200 possible splits. Moves are ordered (captures
+  by expected value first, then ordinary moves interleaved 2:1 with quantum moves), and a node
+  considers only its first ~2·√visits candidates. Without this, the agent left half of an
+  attacked queen en prise. With it, it saves the queen on every tested seed
+  (`test_saves_attacked_queen`).
+* **Rollouts** are short and capture-biased, then scored by `agent/heuristics.py`: material and
+  centrality weighted by the probability that each piece is really there, plus a penalty for a
+  king in superposition.
+* **Bounded simulation cost.** A rollout stops and evaluates statically once an entangled group
+  passes 12 qubits.
+
+```bash
+python -m agent.client --url http://localhost:8000 --color both          # self-play via the API
+python -m agent.client --url http://localhost:8000 --game-id ID --color black
+```
+
+## Docker
+
+```bash
+docker compose up --build                     # API on http://localhost:8000
+docker compose --profile demo up --build      # API plus an MCTS self-play client
+```
 
 ## Development
 

@@ -1,0 +1,201 @@
+"""FastAPI server exposing the quantum chess engine and the MCTS agent over JSON.
+
+Run locally with ``uvicorn api.server:app --reload``; interactive docs are at ``/docs``.
+"""
+
+from __future__ import annotations
+
+import threading
+import uuid
+from dataclasses import dataclass, field
+from typing import Optional
+
+import numpy as np
+from fastapi import FastAPI, HTTPException, Query
+
+from agent.mcts import MCTSAgent, SearchResult
+from api.schemas import (
+    AIMoveRequest,
+    AIMoveResponse,
+    GameState,
+    HistoryEntry,
+    InitRequest,
+    LegalMovesResponse,
+    MeasurementInfo,
+    MoveRequest,
+    MoveResponse,
+    MoveStatsInfo,
+    PieceInfo,
+    SearchInfo,
+)
+from engine.bitboard import COLOR_NAMES, square_name
+from engine.board import IllegalMoveError, MoveResult, QuantumBoard
+from engine.classical import STARTING_FEN
+from engine.measurement import PathMeasurement
+
+KIND_NAMES = ("pawn", "knight", "bishop", "rook", "queen", "king")
+
+
+@dataclass
+class Game:
+    board: QuantumBoard
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+class GameStore:
+    """In-memory game registry. Swap for Redis or a database to scale horizontally."""
+
+    def __init__(self) -> None:
+        self._games: dict[str, Game] = {}
+        self._lock = threading.Lock()
+
+    def create(self, board: QuantumBoard) -> str:
+        game_id = uuid.uuid4().hex[:12]
+        with self._lock:
+            self._games[game_id] = Game(board)
+        return game_id
+
+    def get(self, game_id: str) -> Game:
+        game = self._games.get(game_id)
+        if game is None:
+            raise HTTPException(status_code=404, detail=f"unknown game {game_id!r}")
+        return game
+
+
+# --- Serialisation -------------------------------------------------------------------
+
+
+def serialize_state(game_id: str, board: QuantumBoard) -> GameState:
+    pieces = [
+        PieceInfo(
+            square=square_name(sq),
+            symbol=piece.symbol,
+            kind=KIND_NAMES[piece.kind],
+            color=COLOR_NAMES[piece.color],
+            probability=board.probability(sq),
+        )
+        for sq, piece in enumerate(board.labels)
+        if piece is not None
+    ]
+    return GameState(
+        game_id=game_id,
+        initial_fen=board.initial_fen,
+        turn=COLOR_NAMES[board.turn],
+        winner=COLOR_NAMES[board.winner] if board.winner is not None else None,
+        probabilities=board.probabilities(),
+        pieces=pieces,
+        entanglement_groups=[[square_name(s) for s in g] for g in board.register.groups],
+        history=[
+            HistoryEntry(notation=r.move.notation(), executed=r.executed, outcomes=r.outcomes)
+            for r in board.history
+        ],
+    )
+
+
+def serialize_result(game_id: str, board: QuantumBoard, result: MoveResult) -> dict:
+    measurements = []
+    for m in result.measurements:
+        is_path = isinstance(m, PathMeasurement)
+        measurements.append(
+            MeasurementInfo(
+                kind="path" if is_path else "square",
+                squares=[square_name(s) for s in (m.path if is_path else (m.square,))],
+                probability=m.probability,
+                outcome=m.clear if is_path else m.occupied,
+                collapsed={square_name(s): v for s, v in m.collapsed.items()},
+            )
+        )
+    return dict(
+        move=result.move.notation(),
+        executed=result.executed,
+        captured=result.captured.symbol if result.captured else None,
+        measurements=measurements,
+        state=serialize_state(game_id, board),
+    )
+
+
+def serialize_search(search: SearchResult, limit: int = 5) -> SearchInfo:
+    return SearchInfo(
+        iterations=search.iterations,
+        elapsed=search.elapsed,
+        top_moves=[
+            MoveStatsInfo(move=s.move.notation(), visits=s.visits, value=s.value)
+            for s in search.moves[:limit]
+        ],
+    )
+
+
+# --- Application ---------------------------------------------------------------------
+
+
+def create_app(store: Optional[GameStore] = None) -> FastAPI:
+    store = store or GameStore()
+    app = FastAPI(
+        title="Quantum Chess Engine",
+        version="0.4.0",
+        description="Chess with superposition, entanglement and measurement, simulated with Cirq.",
+    )
+
+    @app.get("/health")
+    def health() -> dict:
+        return {"status": "ok"}
+
+    @app.post("/init", response_model=GameState)
+    def init(request: Optional[InitRequest] = None) -> GameState:
+        request = request or InitRequest()
+        try:
+            board = QuantumBoard(
+                request.fen or STARTING_FEN, rng=np.random.default_rng(request.seed)
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return serialize_state(store.create(board), board)
+
+    @app.get("/state", response_model=GameState)
+    def state(game_id: str = Query(...)) -> GameState:
+        game = store.get(game_id)
+        with game.lock:
+            return serialize_state(game_id, game.board)
+
+    @app.get("/legal_moves", response_model=LegalMovesResponse)
+    def legal_moves(game_id: str = Query(...)) -> LegalMovesResponse:
+        game = store.get(game_id)
+        with game.lock:
+            moves = [m.notation() for m in game.board.legal_moves()]
+        return LegalMovesResponse(game_id=game_id, moves=moves)
+
+    @app.post("/do_move", response_model=MoveResponse)
+    def do_move(request: MoveRequest) -> MoveResponse:
+        game = store.get(request.game_id)
+        with game.lock:
+            if game.board.winner is not None:
+                raise HTTPException(status_code=409, detail="the game is over")
+            try:
+                result = game.board.do_move(request.to_notation())
+            except (IllegalMoveError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+            return MoveResponse(**serialize_result(request.game_id, game.board, result))
+
+    @app.post("/ai_move", response_model=AIMoveResponse)
+    def ai_move(request: AIMoveRequest) -> AIMoveResponse:
+        game = store.get(request.game_id)
+        with game.lock:
+            if game.board.winner is not None:
+                raise HTTPException(status_code=409, detail="the game is over")
+            agent = MCTSAgent(
+                iterations=request.iterations,
+                rollout_depth=request.rollout_depth,
+                time_limit=request.time_limit,
+                seed=request.seed,
+            )
+            search = agent.search(game.board)
+            result = game.board.do_move(search.move)
+            return AIMoveResponse(
+                **serialize_result(request.game_id, game.board, result),
+                search=serialize_search(search),
+            )
+
+    return app
+
+
+app = create_app()
