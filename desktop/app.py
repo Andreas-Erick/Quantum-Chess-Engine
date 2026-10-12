@@ -88,7 +88,18 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def redirect_output() -> None:
+    """A windowed build has no console, so output and errors would vanish. Send them to a log
+    file in the data directory instead."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    log = open(data_dir() / "quantum-chess.log", "w", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stdout or log
+    sys.stderr = sys.stderr or log
+
+
 def main(argv: Optional[list[str]] = None) -> None:
+    redirect_output()
     args = parse_args(argv)
     if args.server:
         url = args.server
