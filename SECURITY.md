@@ -6,7 +6,7 @@ widely known.
 
 ## Reporting a vulnerability
 
-Use **[Report a vulnerability](https://github.com/Andreas-Erick/Quantum-Chess/security/advisories/new)**
+Use **[Report a vulnerability](https://github.com/Andreas-Erick/Quantum-Chess-Engine/security/advisories/new)**
 on the repository's Security tab. Please don't open a public issue for a security problem.
 
 Include what an attacker could do, the steps to reproduce it, and the version you tested (the
@@ -15,7 +15,7 @@ and you'll be credited in it unless you'd rather not be.
 
 ## Supported versions
 
-Only the [latest release](https://github.com/Andreas-Erick/Quantum-Chess/releases/latest) and
+Only the [latest release](https://github.com/Andreas-Erick/Quantum-Chess-Engine/releases/latest) and
 `main` get security fixes.
 
 ## What is in scope
