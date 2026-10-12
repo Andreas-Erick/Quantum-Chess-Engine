@@ -1,0 +1,7 @@
+# Store text files with LF line endings, whatever the contributor's platform and settings.
+* text=auto eol=lf
+
+# Binary assets: never touch their bytes.
+*.png binary
+*.ico binary
+*.icns binary

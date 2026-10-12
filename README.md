@@ -230,194 +230,25 @@ flowchart LR
     end
 ```
 
-### Engine (`engine/`)
+- **Engine** (`engine/`): a perft-verified bitboard chess engine, plus a sparse quantum
+  register. Only uncertain squares are qubits, kept in independent entanglement groups, so the
+  cost grows with the largest group, not the number of uncertain squares.
+- **AI** (`agent/`): open-loop Monte Carlo Tree Search that averages over the quantum dice, with
+  probability-weighted evaluation and three strength levels.
+- **API** (`api/`): FastAPI with a WebSocket live feed, online seats and jointly seeded,
+  verifiable dice.
+- **UI** (`ui/`) and **desktop app** (`desktop/`): React 19, TypeScript and Vite, in a browser
+  or a native window that can host friends.
 
-Every square has a classical **label** (the piece that would be there) and, only while uncertain,
-a qubit (`cirq.GridQubit(rank, file)`, where |1⟩ means occupied). Uncertain qubits are kept in
-**independent groups**, each with its own state vector. Groups merge (tensor product) only when a
-gate or measurement spans them, which happens when pieces actually interact. A square is factored
-back out the moment its probability returns to exactly 0 or 1.
+## Documentation
 
-| Move | Unitary |
+| | |
 |---|---|
-| Jump | `iSWAP(source, target)` |
-| Split | `√iSWAP(source, t1)`, then `iSWAP(source, t2)` |
-| Merge | inverse of split |
-| Slide | `iSWAP(source, target)` controlled on every path square being empty |
-
-A capture along an uncertain path makes a **path measurement**, which answers only "is the path
-clear?". If the path is blocked, the possible blockers stay uncertain, now entangled with each
-other. `QuantumBoard.joint_probability` exposes these correlations.
-
-The classical layer is a complete bitboard chess engine (castling, en passant, promotion, pins,
-every draw rule), verified with **perft** against published node counts, for example 197,281 at
-depth 4 from the start position and 97,862 at depth 3 for "Kiwipete".
-
-### AI (`agent/`)
-
-Minimax breaks down when every capture can branch on a random outcome. The agent uses
-**open-loop MCTS**: tree nodes are move sequences, and each iteration replays them on a fresh copy
-of the position with newly sampled measurements. The statistics on each node therefore average
-over the quantum dice.
-
-- **Progressive widening.** A node considers about 0.7·√visits candidates, so a queen's ~200
-  possible splits don't drown out the good moves. At the root, every move is first played on a
-  copy and scored one move ahead, so the search starts with the most promising moves and moves
-  that hang the king sink to the bottom. Deeper nodes order captures by expected value, then
-  interleave ordinary and quantum moves.
-- **Evaluation.** Material and centrality are weighted by the probability that each piece is
-  really there, minus a penalty for a king in superposition. A *threat* term credits the side to
-  move with part of its best available capture (a hanging piece, a winning trade, the king), so
-  a search that stops mid-exchange still sees what is about to be lost.
-- **Rollouts** take a king capture whenever one exists, prefer captures, and play a quantum move
-  only 15% of the time; uniform choice would make them almost entirely random splits.
-- **Bounded cost.** A rollout stops and evaluates statically once an entangled group passes 12
-  qubits.
-
-### Visualizer (`ui/`)
-
-React 19, TypeScript and Vite. FastAPI serves the built app at `/`. Pieces fade with probability,
-entanglement groups share ring colours, collapsed squares flash, and the move log explains each
-measurement (`d2 occupied? (50%) → no · 6 squares collapsed`). A `?game=<id>` link opens a
-specific game.
-
-The **tutorial** runs seven lessons (capturing the king, check, split, merge, splitting again,
-measurement, entanglement) on real engine games. Each lesson is data in
-`ui/src/tutorial/lessons.json`: a position, the moves the player may make, the opponent's scripted
-reply and an explanation. Only the moves a step asks for are clickable. `tests/test_tutorial.py`
-replays every lesson on the engine and checks what the text claims, for example that the queen
-ends up 50% on h5 and entangled with the knight.
-
-**Online games** give each player a secret seat token; `/do_move` accepts a move only with the
-token of the side to move, and only once both players are seated. Every move is pushed to `/ws`
-subscribers, so both screens update instantly and a reconnecting client catches up from the full
-history. The dice are seeded by both sides and verifiable afterwards (see *Play a friend* above).
-
-**The desktop app** runs the same FastAPI app in-process on `127.0.0.1`. **Host a game** starts a
-second listener for the same app on the local network, which refuses `/init`, `/ai_move` and
-`/online/create` (`GuestsOnly`), so other machines can play the host's online games but not spend
-its CPU and memory. The page talks to the app through a small bridge (`window.pywebview.api`)
-that refuses hosting and joining on any page but the app's own, because a friend's page loaded
-in the same window gets the bridge too. Before each page load the app checks the address and
-sends the window home unless it is the app's own page or a game it joined.
-
-## API
-
-<details>
-<summary>Endpoints</summary>
-
-| Method | Path | Purpose |
-|---|---|---|
-| `POST` | `/init` | New game (`{fen?, seed?}`) → `GameState` |
-| `POST` | `/do_move` | `{game_id, notation}` or `{game_id, move_type, source, target1, target2?, source2?, promotion?}` |
-| `GET` | `/state?game_id=` | Pieces, 64 probabilities, entanglement groups, full history |
-| `GET` | `/legal_moves?game_id=` | All legal moves in notation |
-| `GET` | `/levels` | AI strength levels (`easy`, `medium`, `hard`) and which is the default |
-| `GET` | `/correlations?game_id=&square=` | Entangled squares' probabilities given that square is occupied / empty |
-| `POST` | `/ai_move` | MCTS move (`{game_id, iterations?, rollout_depth?, time_limit?, seed?}`) |
-| `POST` | `/online/create` | Online game (`{color: white\|black\|random}`) → `{game_id, color, token, state}` |
-| `POST` | `/online/join` | Take the open seat (`{game_id, seed?}`) → `{game_id, color, token, state}`; `409` if full |
-| `WS` | `/ws?game_id=` | Live feed: `{type: "state", state}` on connect and joins, `{type: "move", ...}` per move |
-| `GET` | `/health` | Liveness probe |
-
-Online games' `GameState` carries `fairness`: the server's `commitment`, the joiner's
-`guest_seed`, and the `secret` once the game is over.
-
-Errors: `400` illegal move or bad FEN, `403` not your turn in an online game (or AI requested
-there, or a host-only endpoint on a desktop app's network listener), `404` unknown game, `409`
-game over or opponent not seated yet, `422` malformed payload (including over-long ids, tokens,
-FENs or moves). Every move response lists its measurements: what was asked, the prior probability, the
-outcome, and every square that collapsed.
-
-</details>
-
-<details>
-<summary>Using the engine from Python</summary>
-
-```python
-from engine.board import QuantumBoard
-
-board = QuantumBoard()
-board.do_move("g1^f3h3")            # knight: 50% f3, 50% h3
-board.do_move("e7e5")
-board.do_move("f3h3^g1")            # interference: back on g1 with certainty
-print(board)
-print(board.probabilities())        # 64 occupancy probabilities, a1..h8
-```
-
-</details>
-
-<details>
-<summary>AI self-play through the API</summary>
-
-```bash
-python -m agent.client --url http://localhost:8000 --color both                 # self-play
-python -m agent.client --url http://localhost:8000 --game-id ID --color black   # join a game
-python -m agent.client --level hard --color white                               # pick a level
-docker compose --profile demo up --build                                        # API + self-play
-```
-
-</details>
-
-## Project layout
-
-<details>
-<summary>Files</summary>
-
-```
-engine/
-  bitboard.py       square indexing, attack tables, ray-based slider attacks
-  classical.py      ClassicalBoard: FEN, legal moves, make/unmake, game outcomes
-  register.py       sparse register: independent Cirq-simulated entanglement groups
-  moves.py          jump / split / merge / slide, notation, iSWAP-family gates
-  measurement.py    Born-rule sampling, collapse, chain reactions
-  board.py          QuantumBoard: ties the classical and quantum layers together
-api/
-  schemas.py        Pydantic models: the JSON contract
-  server.py         FastAPI endpoints, online seats, /ws live feed, serves the UI
-  fairness.py       jointly seeded dice for online games, and verifying them
-agent/
-  heuristics.py     probability-weighted evaluation with a one-capture threat term
-  mcts.py           open-loop MCTS with progressive widening and root lookahead
-  arena.py          agent-vs-agent matches for measuring strength
-  client.py         remote agent that plays using only the API
-desktop/
-  app.py            native window, in-process server, hosting and joining, Game menu
-  make_icon.py      draws icon.png / .ico / .icns and ui/public/favicon.svg
-  quantum_chess.spec  PyInstaller build for Windows and macOS
-  installer.iss     Inno Setup script for the Windows installer
-  sign-windows.ps1, entitlements.plist   release signing (Windows) and hardened runtime (macOS)
-ui/src/
-  App.tsx           game flow: local, AI, tutorial and online games
-  components/       Board, MoveLog, TutorialCard, OnlineCard
-  tutorial/         lessons.json and its types
-  api.ts, types.ts  the JSON contract, mirrored from api/schemas.py
-  live.ts           live-feed WebSocket with reconnects
-  desktop.ts        the desktop app bridge (host, join, back to my games)
-  storage.ts        per-browser state: resumed game, seats and seeds, finished lessons
-  moves.ts          clicks -> move notation, driven by the legal-move list
-tests/              classical, superposition, measurement, entanglement, rules, agent, arena, api,
-                    online, fairness, tutorial, desktop
-```
-
-</details>
-
-## Development
-
-```bash
-pip install -r requirements-dev.txt
-pytest -q                                   # 231 tests, ~15 s
-black --check . && flake8
-cd ui && npm ci && npm test && npm run build
-cd ui && npm run dev                        # UI with hot reload on :5173 (proxies to :8000)
-python -m desktop                           # the desktop app, from source
-python -m agent.arena --games 40 --a iterations=400 --b iterations=100   # agent strength match
-```
-
-`requirements*.txt` give version ranges, and CI tests against the newest versions in them. The
-Docker image and the desktop releases install from `requirements.lock` and
-`requirements-desktop.lock` instead: exact versions with hashes, for every platform. Regenerate
-them after changing a requirements file, with the `uv pip compile` command in each lock's header.
+| [docs/architecture.md](docs/architecture.md) | The layers, the state model, the life of a move, security boundaries, and how to add rules, endpoints, AI levels, lessons and UI features |
+| [docs/api.md](docs/api.md) | Endpoints, responses, the live feed, errors, and using the engine from Python |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, running, checks, conventions and releasing |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
+| [SECURITY.md](SECURITY.md) | Reporting vulnerabilities, and the known limitations |
 
 ## Limitations and next steps
 

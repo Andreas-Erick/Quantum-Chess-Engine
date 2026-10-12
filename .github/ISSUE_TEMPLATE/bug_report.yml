@@ -1,0 +1,48 @@
+name: Bug report
+description: Something doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! For a **security** problem, please don't open an issue: use
+        [Report a vulnerability](https://github.com/Andreas-Erick/Quantum-Chess-Engine/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The moves played (the move log, or a `?game=` link), and what you clicked.
+      placeholder: |
+        1. New game against Medium
+        2. g1^f3h3, then …
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - Desktop app (Windows)
+        - Desktop app (macOS)
+        - Browser (Docker or a server)
+        - The API or engine directly
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release (e.g. 0.8.2), or a commit if you run from source.
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, error messages, or the desktop app's log (`%APPDATA%\QuantumChess\quantum-chess.log` on Windows).
