@@ -1,6 +1,6 @@
 [project]
 name = "quantum-chess"
-version = "0.8.0"
+version = "0.8.1"
 description = "Chess with superposition, entanglement and measurement, simulated with Cirq."
 requires-python = ">=3.10"
 license = { text = "MIT" }
