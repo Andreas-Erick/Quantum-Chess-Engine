@@ -111,12 +111,16 @@ class QuantumRegister:
     def apply(self, operations: Iterable[cirq.Operation]) -> None:
         circuit = cirq.Circuit(operations)
         group = self._combine(sorted(qubit_square(q) for q in circuit.all_qubits()))
-        group.state = cirq.final_state_vector(
-            circuit,
-            initial_state=group.state,
-            qubit_order=[square_qubit(sq) for sq in group.squares],
-            dtype=np.complex128,
+        # Apply the gates' unitaries straight to the state tensor: the same maths as
+        # cirq.final_state_vector without the simulator's per-call setup.
+        tensor = group.tensor().copy()
+        args = cirq.ApplyUnitaryArgs(
+            target_tensor=tensor,
+            available_buffer=np.empty_like(tensor),
+            axes=range(len(group.squares)),
         )
+        qubits = [square_qubit(sq) for sq in group.squares]
+        group.state = cirq.apply_unitaries(circuit.all_operations(), qubits, args).reshape(-1)
         self.circuit += circuit
 
     def probability(self, sq: int) -> float:

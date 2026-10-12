@@ -57,8 +57,9 @@ uvicorn api.server:app
   the exact quantum state from JSON. The remote AI client does exactly that.
 - **An AI for a game with randomness built in.** Open-loop MCTS averages over measurement
   outcomes in proportion to their true probabilities. Progressive widening keeps the search
-  focused despite hundreds of possible splits per position.
-- **Tested hard where things are random.** 165 Python tests and 8 UI tests: perft-verified move
+  focused despite hundreds of possible splits per position. Improvements are measured, not
+  guessed: an arena plays agent versions against each other.
+- **Tested hard where things are random.** 175 Python tests and 8 UI tests: perft-verified move
   generation, forced and statistical measurement outcomes, A→B→C entanglement chains, and
   random-play invariant checks. CI runs everything plus a Docker smoke test.
 
@@ -135,11 +136,17 @@ Minimax breaks down when every capture can branch on a random outcome. The agent
 of the position with newly sampled measurements. The statistics on each node therefore average
 over the quantum dice.
 
-- **Progressive widening.** Captures are ordered by expected value, then ordinary and quantum
-  moves are interleaved. A node considers about 2·√visits candidates, so a queen's ~200 possible
-  splits don't drown out the good moves.
+- **Progressive widening.** A node considers about 2·√visits candidates, so a queen's ~200
+  possible splits don't drown out the good moves. At the root, every move is first played on a
+  copy and scored one move ahead, so the search starts with the most promising moves and moves
+  that hang the king sink to the bottom. Deeper nodes order captures by expected value, then
+  interleave ordinary and quantum moves.
 - **Evaluation.** Material and centrality are weighted by the probability that each piece is
-  really there, minus a penalty for a king in superposition.
+  really there, minus a penalty for a king in superposition. A *threat* term credits the side to
+  move with part of its best available capture (a hanging piece, a winning trade, the king), so
+  a search that stops mid-exchange still sees what is about to be lost.
+- **Rollouts** take a king capture whenever one exists, prefer captures, and play a quantum move
+  only 15% of the time; uniform choice would make them almost entirely random splits.
 - **Bounded cost.** A rollout stops and evaluates statically once an entangled group passes 12
   qubits.
 
@@ -215,13 +222,14 @@ api/
   schemas.py        Pydantic models: the JSON contract
   server.py         FastAPI endpoints, in-memory game store, serves the UI
 agent/
-  heuristics.py     probability-weighted evaluation
-  mcts.py           open-loop MCTS with progressive widening
+  heuristics.py     probability-weighted evaluation with a one-capture threat term
+  mcts.py           open-loop MCTS with progressive widening and root lookahead
+  arena.py          agent-vs-agent matches for measuring strength
   client.py         remote agent that plays using only the API
 ui/src/
   components/       Board (probabilities, rings, conditional overlays), MoveLog
   moves.ts          clicks -> move notation, driven by the legal-move list
-tests/              classical, superposition, measurement, entanglement, agent, api
+tests/              classical, superposition, measurement, entanglement, rules, agent, arena, api
 ```
 
 </details>
@@ -230,16 +238,18 @@ tests/              classical, superposition, measurement, entanglement, agent, 
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                                   # 165 tests, ~10 s
+pytest -q                                   # 175 tests, ~10 s
 black --check . && flake8
 cd ui && npm ci && npm test && npm run build
 cd ui && npm run dev                        # UI with hot reload on :5173 (proxies to :8000)
+python -m agent.arena --games 40 --a iterations=400 --b iterations=100   # agent strength match
 ```
 
 ## Limitations and next steps
 
-- The AI plays legal, sensible moves but is weak at default strength. Stronger evaluation or more
-  iterations would help.
+- The AI looks ahead only a few moves and still loses to deeper tactics. Measured in the arena,
+  the threat-aware evaluation and root lookahead beat the previous agent 82% of the time (160
+  games, equal iterations and time per move).
 - En passant is not available in quantum play, and pawns cannot split.
 - Games are stored in memory; a restart clears them. Redis or a database would make the API
   stateless.

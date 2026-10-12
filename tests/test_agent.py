@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from agent.heuristics import WIN_SCORE, evaluate, win_probability
+from agent.heuristics import WIN_SCORE, best_capture, evaluate, win_probability
 from agent.mcts import MCTSAgent
 from engine.bitboard import BLACK, WHITE, parse_square
 from engine.board import QuantumBoard
@@ -42,6 +42,32 @@ def test_uncertain_king_is_penalised():
     before = evaluate(board, WHITE)
     board.do_move("e1^d1f1")
     assert evaluate(board, WHITE) < before
+
+
+def test_best_capture_finds_hanging_piece():
+    board = QuantumBoard("4k3/8/8/3r4/8/8/8/3QK3 w - - 0 1")
+    assert best_capture(board) == pytest.approx(5.0)  # free rook
+
+
+def test_best_capture_charges_for_defended_target():
+    # The rook on d5 is defended by the pawn on e6: Qxd5 wins 5 but loses the queen.
+    board = QuantumBoard("4k3/8/4p3/3r4/8/8/8/3QK3 w - - 0 1")
+    assert best_capture(board) == 0.0
+
+
+def test_best_capture_scales_with_probability():
+    board = QuantumBoard("4k3/8/8/8/8/8/8/1N2K2r w - - 0 1")
+    board.do_move("b1^a3c3")
+    board.do_move("h1h3")  # attacks the 50% knight on c3 (and a3 behind it)
+    assert best_capture(board) == pytest.approx(0.0)  # white to move: nothing to take
+    board.do_move("e1e2")
+    assert best_capture(board) == pytest.approx(1.5)  # half a knight
+
+
+def test_threat_to_own_piece_lowers_evaluation():
+    safe = QuantumBoard("4k3/8/8/8/8/8/3Q4/3RK3 b - - 0 1")
+    hanging = QuantumBoard("3rk3/8/8/8/8/8/3Q4/4K3 b - - 0 1")
+    assert evaluate(hanging, WHITE) < evaluate(safe, WHITE) - 3
 
 
 def test_decided_game_scores():
@@ -106,6 +132,21 @@ def test_saves_attacked_queen(seed):
     board.do_move(MCTSAgent(iterations=400, seed=seed).choose_move(board))
     exposed = sum(board.probability(sq(f"d{rank}")) for rank in range(1, 8))
     assert exposed == 0
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_moves_king_out_of_attack(seed):
+    # The knight on e5 attacks the black king on d7: anything but dealing with it loses.
+    board = QuantumBoard("8/p2k4/8/4N3/8/8/P7/4K3 b - - 0 1")
+    board.do_move(MCTSAgent(iterations=100, seed=seed).choose_move(board))
+    assert board.king_threats(BLACK) == {}
+
+
+def test_root_lookahead_puts_king_blunders_last():
+    board = QuantumBoard("4k3/8/8/8/8/8/3r4/4K3 w - - 0 1")
+    order = MCTSAgent._lookahead_order(board, board.legal_moves(), np.random.default_rng(0))
+    assert order[0].notation() == "e1d2"  # take the rook
+    assert order[-1].notation() in ("e1e2", "e1f2", "e1^e2f2", "e1^f2e2")
 
 
 def test_search_is_reproducible_and_leaves_board_untouched():
