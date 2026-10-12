@@ -666,3 +666,14 @@ button.primary {
 .fairness code {
   font-size: 11px;
 }
+
+.hosting {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+
+.hosting p {
+  margin: 0 0 8px;
+}

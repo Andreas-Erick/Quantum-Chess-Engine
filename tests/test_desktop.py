@@ -5,7 +5,15 @@ import httpx
 import pytest
 
 from api.server import create_app
-from desktop.app import Desktop, JoinedGames, free_port, join_game, parse_args, start_server
+from desktop.app import (
+    Desktop,
+    JoinedGames,
+    free_port,
+    join_game,
+    parse_args,
+    start_server,
+    stop_server,
+)
 
 FEN = "k7/8/8/8/1n6/8/8/R3K3 b - - 0 1"  # see tests/test_fairness.py
 
@@ -67,19 +75,94 @@ def test_hosting_shares_the_games_on_a_second_listener(host_app, tmp_path):
     desktop = make_desktop(app, url, tmp_path)
     lan = desktop.host()
     assert desktop.host() == lan  # started once
-    assert desktop.info() == {"local_url": f"{url}/", "lan_url": lan}
+    assert desktop.info() == {"own_page": True, "lan_url": lan}
     game_id = httpx.post(f"{url}/online/create", json={}).json()["game_id"]
     port = lan.rsplit(":", 1)[1]
     # The same game is reachable through the network listener.
     assert httpx.get(f"http://127.0.0.1:{port}/state", params={"game_id": game_id}).is_success
 
 
+def test_network_guests_can_play_but_not_start_games(host_app, tmp_path):
+    app, url = host_app
+    desktop = make_desktop(app, url, tmp_path)
+    lan = "http://127.0.0.1:" + desktop.host().rsplit(":", 1)[1]
+    game_id = httpx.post(f"{url}/online/create", json={}).json()["game_id"]
+    assert httpx.post(f"{lan}/online/join", json={"game_id": game_id}).is_success
+    assert httpx.get(f"{lan}/state", params={"game_id": game_id}).is_success
+    for path in ("/init", "/init/", "/ai_move", "/online/create"):
+        response = httpx.post(f"{lan}{path}", json={"game_id": game_id})
+        assert response.status_code == 403, path
+        assert "Only the host" in response.json()["detail"]
+    assert httpx.post(f"{url}/init", json={}).is_success  # the host still can
+
+
+def test_stop_hosting_closes_the_network_listener(host_app, tmp_path):
+    app, url = host_app
+    desktop = make_desktop(app, url, tmp_path)
+    lan = "http://127.0.0.1:" + desktop.host().rsplit(":", 1)[1]
+    assert httpx.get(f"{lan}/health").is_success
+    desktop.stop_hosting()
+    assert desktop.info() == {"own_page": True, "lan_url": None}
+    with pytest.raises(httpx.ConnectError):
+        httpx.get(f"{lan}/health")
+    assert httpx.get(f"{url}/health").is_success  # the app itself keeps running
+    assert desktop.host() != f"{lan}"  # and can host again, on a new port
+
+
+def test_stop_server_returns_once_stopped():
+    port = free_port("127.0.0.1")
+    server = start_server("127.0.0.1", port, create_app(ui_dir=None))
+    stop_server(server)
+    assert not server.thread.is_alive()
+
+
+def test_window_only_shows_pages_the_app_opened(host_app, tmp_path):
+    app, url = host_app
+    desktop = make_desktop(app, url, tmp_path)
+    window = desktop._window
+    for allowed in (f"{url}/?game=abc", "about:blank"):
+        window.url = allowed
+        desktop._check_page()
+        assert window.url == allowed and window.dialogs == []
+    window.url = "https://login.example.com/signin"  # a host's page sent the window here
+    desktop._check_page()
+    assert window.url == f"{url}/"
+    assert "https://login.example.com" in window.dialogs[-1]
+
+
+def test_a_joined_hosts_pages_are_allowed(host_app, tmp_path):
+    app, url = host_app
+    guest = Desktop(None, "http://127.0.0.1:1/", JoinedGames(tmp_path / "guest.json"))
+    guest._window = FakeWindow("http://127.0.0.1:1/")
+    game_id = httpx.post(f"{url}/online/create", json={}).json()["game_id"]
+    guest.join(f"{url}/?join={game_id}")
+    guest._window.url = f"{url}/?game=other"
+    guest._check_page()
+    assert guest._window.url == f"{url}/?game=other" and guest._window.dialogs == []
+
+
+def test_server_mode_keeps_to_its_server(tmp_path):
+    desktop = Desktop(None, None, JoinedGames(tmp_path / "j.json"), start_url="https://qc.example")
+    desktop._window = FakeWindow("https://qc.example/?game=abc")
+    desktop._check_page()
+    assert desktop._window.dialogs == []
+    desktop._window.url = "https://elsewhere.example/"
+    desktop._check_page()
+    assert desktop._window.url == "https://qc.example"
+    desktop.home()
+    assert desktop._window.url == "https://qc.example"
+
+
 def test_foreign_pages_cannot_host_or_join(host_app, tmp_path):
     app, url = host_app
     desktop = make_desktop(app, url, tmp_path)
+    desktop.host()
     desktop._window.url = "http://192.168.1.50:8000/?game=abc"  # a host's page, after joining
+    assert desktop.info() == {"own_page": False, "lan_url": None}  # learns nothing about us
     with pytest.raises(PermissionError):
         desktop.host()
+    with pytest.raises(PermissionError):
+        desktop.stop_hosting()
     with pytest.raises(PermissionError):
         desktop.join("http://192.168.1.50:8000/?join=abc")
     desktop.home()

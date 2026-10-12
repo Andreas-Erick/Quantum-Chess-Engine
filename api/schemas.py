@@ -9,24 +9,32 @@ from pydantic import BaseModel, Field, model_validator
 Color = Literal["white", "black"]
 SquareName = str  # "a1" .. "h8"
 
+# Bounds on free text, so a request can't make the server parse megabytes.
+MAX_ID = 64  # game ids and seat tokens
+MAX_FEN = 128
+
 
 class InitRequest(BaseModel):
-    fen: Optional[str] = Field(None, description="Starting position; standard setup if omitted")
+    fen: Optional[str] = Field(
+        None, max_length=MAX_FEN, description="Starting position; standard setup if omitted"
+    )
     seed: Optional[int] = Field(None, description="Seed for measurement outcomes")
 
 
 class MoveRequest(BaseModel):
     """A move either as notation (``e2e4``, ``b1^a3c3``, ``a3c3^b1``) or as structured fields."""
 
-    game_id: str
-    notation: Optional[str] = None
+    game_id: str = Field(max_length=MAX_ID)
+    notation: Optional[str] = Field(None, max_length=16)
     move_type: Literal["jump", "split", "merge"] = "jump"
     source: Optional[SquareName] = None
     source2: Optional[SquareName] = Field(None, description="Second source of a merge")
     target1: Optional[SquareName] = None
     target2: Optional[SquareName] = Field(None, description="Second target of a split")
     promotion: Optional[Literal["q", "r", "b", "n"]] = None
-    token: Optional[str] = Field(None, description="Seat token; required in online games")
+    token: Optional[str] = Field(
+        None, max_length=MAX_ID, description="Seat token; required in online games"
+    )
 
     @model_validator(mode="after")
     def _check_fields(self) -> "MoveRequest":
@@ -58,7 +66,7 @@ LevelName = Literal["easy", "medium", "hard"]
 class AIMoveRequest(BaseModel):
     """Pick a ``level``, or tune the search directly (the fields below apply without a level)."""
 
-    game_id: str
+    game_id: str = Field(max_length=MAX_ID)
     level: Optional[LevelName] = Field(None, description="Named strength; overrides the rest")
     iterations: int = Field(400, ge=1, le=20000)
     rollout_depth: int = Field(6, ge=0, le=40)
@@ -174,11 +182,11 @@ class LegalMovesResponse(BaseModel):
 
 class OnlineCreateRequest(BaseModel):
     color: Literal["white", "black", "random"] = Field("white", description="The creator's side")
-    fen: Optional[str] = None
+    fen: Optional[str] = Field(None, max_length=MAX_FEN)
 
 
 class JoinRequest(BaseModel):
-    game_id: str
+    game_id: str = Field(max_length=MAX_ID)
     seed: Optional[str] = Field(
         None,
         max_length=128,

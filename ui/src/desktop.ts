@@ -3,9 +3,12 @@ import { useEffect, useState } from "react";
 // What the desktop app (desktop/app.py) offers the page as window.pywebview.api.
 // Hosting and joining are only allowed on the app's own page, never on a host's page.
 export interface DesktopApi {
-  info(): Promise<{ local_url: string | null; lan_url: string | null }>;
+  /** Whether this page is the app's own, and its network address while hosting. */
+  info(): Promise<{ own_page: boolean; lan_url: string | null }>;
   /** Start accepting players from the local network; resolves to the address to invite to. */
   host(): Promise<string>;
+  /** Stop accepting players from the network. */
+  stop_hosting(): Promise<void>;
   /** Join from an invite link. The app generates and keeps the seed, then opens the game. */
   join(link: string): Promise<void>;
   /** Back to this app's own games. */
@@ -27,7 +30,7 @@ declare global {
 }
 
 /** The desktop bridge, or null in a normal browser. */
-export function useDesktop(): [Desktop | null, (lanUrl: string) => void] {
+export function useDesktop(): [Desktop | null, (lanUrl: string | null) => void] {
   const [desktop, setDesktop] = useState<Desktop | null>(null);
 
   useEffect(() => {
@@ -39,8 +42,7 @@ export function useDesktop(): [Desktop | null, (lanUrl: string) => void] {
         .info()
         .then((info) => {
           if (cancelled) return;
-          const ownPage = !!info.local_url && new URL(info.local_url).origin === window.location.origin;
-          setDesktop({ api, ownPage, lanUrl: info.lan_url });
+          setDesktop({ api, ownPage: info.own_page, lanUrl: info.lan_url });
         })
         .catch(() => {});
     };
@@ -52,7 +54,7 @@ export function useDesktop(): [Desktop | null, (lanUrl: string) => void] {
     };
   }, []);
 
-  const setLanUrl = (lanUrl: string) => setDesktop((d) => (d ? { ...d, lanUrl } : d));
+  const setLanUrl = (lanUrl: string | null) => setDesktop((d) => (d ? { ...d, lanUrl } : d));
   return [desktop, setLanUrl];
 }
 
