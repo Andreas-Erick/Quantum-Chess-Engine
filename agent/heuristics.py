@@ -63,6 +63,8 @@ def attacks(board: QuantumBoard, sq: int) -> int:
     Like the engine's slides, only certainly occupied squares block a line.
     """
     piece = board.piece_at(sq)
+    if piece is None:
+        return 0
     if piece.kind == PAWN:
         return PAWN_ATTACKS[piece.color][sq]
     if piece.kind == KNIGHT:

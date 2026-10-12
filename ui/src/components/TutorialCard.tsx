@@ -1,5 +1,5 @@
-import type { MeasurementInfo } from "../types";
 import { LESSONS, type TutorialProgress } from "../tutorial/lessons";
+import type { MeasurementInfo } from "../types";
 import { describe } from "./MoveLog";
 
 interface TutorialCardProps {
@@ -26,6 +26,7 @@ export function TutorialCard({ progress, lessonsDone, measurements, busy, onLess
         {LESSONS.map((l, i) => (
           <li key={l.id}>
             <button
+              type="button"
               className={[i === progress.lesson ? "active" : "", lessonsDone.includes(l.id) ? "done" : ""].join(" ")}
               aria-current={i === progress.lesson ? "step" : undefined}
               title={l.title}
@@ -44,6 +45,7 @@ export function TutorialCard({ progress, lessonsDone, measurements, busy, onLess
           {measurements.length > 0 && (
             <ul className="outcomes">
               {measurements.map((m, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: a move's measurements never change or reorder
                 <li key={i}>⚄ {describe(m)}</li>
               ))}
             </ul>
@@ -60,20 +62,22 @@ export function TutorialCard({ progress, lessonsDone, measurements, busy, onLess
         </p>
       )}
       <div className="buttons">
-        <button onClick={() => onLesson(progress.lesson)} disabled={busy}>
+        <button type="button" onClick={() => onLesson(progress.lesson)} disabled={busy}>
           Restart lesson
         </button>
         {progress.done && !last && (
-          <button className="primary" onClick={() => onLesson(progress.lesson + 1)} disabled={busy}>
+          <button type="button" className="primary" onClick={() => onLesson(progress.lesson + 1)} disabled={busy}>
             Next lesson
           </button>
         )}
         {progress.done && last ? (
-          <button className="primary" onClick={onExit}>
+          <button type="button" className="primary" onClick={onExit}>
             Play a real game
           </button>
         ) : (
-          <button onClick={onExit}>Exit tutorial</button>
+          <button type="button" onClick={onExit}>
+            Exit tutorial
+          </button>
         )}
       </div>
     </section>

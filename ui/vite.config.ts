@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
 
 const API = process.env.QC_API_URL ?? "http://localhost:8000";
 const apiRoutes = [

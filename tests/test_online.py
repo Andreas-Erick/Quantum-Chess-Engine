@@ -126,9 +126,11 @@ def test_live_feed_unsubscribes_on_disconnect():
 
 
 def test_live_feed_for_unknown_game_is_refused(client):
-    with pytest.raises(WebSocketDisconnect) as excinfo:
-        with client.websocket_connect("/ws?game_id=nope") as feed:
-            feed.receive_json()
+    with (
+        pytest.raises(WebSocketDisconnect) as excinfo,
+        client.websocket_connect("/ws?game_id=nope") as feed,
+    ):
+        feed.receive_json()
     assert excinfo.value.code == 4404
 
 

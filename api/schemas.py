@@ -6,7 +6,11 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-Color = Literal["white", "black"]
+from agent.levels import LevelName
+from engine.bitboard import ColorName
+
+Color = ColorName
+KindName = Literal["pawn", "knight", "bishop", "rook", "queen", "king"]
 SquareName = str  # "a1" .. "h8"
 
 # Bounds on free text, so a request can't make the server parse megabytes.
@@ -37,7 +41,7 @@ class MoveRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _check_fields(self) -> "MoveRequest":
+    def _check_fields(self) -> MoveRequest:
         if self.notation is not None:
             return self
         required = {
@@ -60,9 +64,6 @@ class MoveRequest(BaseModel):
         return f"{self.source}{self.target1}{self.promotion or ''}"
 
 
-LevelName = Literal["easy", "medium", "hard"]
-
-
 class AIMoveRequest(BaseModel):
     """Pick a ``level``, or tune the search directly (the fields below apply without a level)."""
 
@@ -77,7 +78,7 @@ class AIMoveRequest(BaseModel):
 class PieceInfo(BaseModel):
     square: SquareName
     symbol: str = Field(description="FEN letter: uppercase white, lowercase black")
-    kind: Literal["pawn", "knight", "bishop", "rook", "queen", "king"]
+    kind: KindName
     color: Color
     probability: float
 
@@ -120,7 +121,7 @@ class GameState(BaseModel):
         None,
         description="Online games only: which colours a player has claimed. Null for local games",
     )
-    fairness: Optional["FairnessInfo"] = Field(
+    fairness: Optional[FairnessInfo] = Field(
         None, description="Online games only: how the dice were seeded (see api/fairness.py)"
     )
 

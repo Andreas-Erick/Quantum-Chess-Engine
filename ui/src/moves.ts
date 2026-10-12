@@ -55,12 +55,7 @@ export function nextSquares(mode: Mode, picked: string[], legal: ParsedMove[]): 
 }
 
 /** The legal move completed by ``picked``, if any (queen promotion by default). */
-export function completedMove(
-  mode: Mode,
-  picked: string[],
-  legal: ParsedMove[],
-  promotion = "q",
-): string | null {
+export function completedMove(mode: Mode, picked: string[], legal: ParsedMove[], promotion = "q"): string | null {
   const needed = mode === "jump" ? 2 : 3;
   if (picked.length !== needed) return null;
   for (const move of legal) {

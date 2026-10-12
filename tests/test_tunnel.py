@@ -67,7 +67,7 @@ def test_explains_a_tunnel_that_fails(tmp_path):
 
 def test_missing_cloudflared_without_a_package_manager_explains(monkeypatch):
     monkeypatch.setattr(tunnel_module.shutil, "which", lambda name: None)
-    monkeypatch.setattr(tunnel_module, "_known_locations", lambda: [])
+    monkeypatch.setattr(tunnel_module, "_known_locations", list)
     monkeypatch.setattr(tunnel_module.sys, "platform", "linux")
     with pytest.raises(TunnelError, match="github.com/cloudflare/cloudflared"):
         Tunnel(52814).start()

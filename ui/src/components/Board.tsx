@@ -1,5 +1,5 @@
-import type { Correlations, GameState, Kind, PieceInfo } from "../types";
 import { FILES, squareIndex, squareName } from "../moves";
+import type { Correlations, GameState, Kind, PieceInfo } from "../types";
 
 // U+FE0E asks for the text glyph: without it, some systems draw ♟ as a colour emoji.
 const GLYPHS: Record<Kind, string> = {
@@ -32,7 +32,9 @@ export function Board(props: BoardProps) {
 
   const pieces = new Map<string, PieceInfo>(state.pieces.map((p) => [p.square, p]));
   const groupOf = new Map<string, number>();
-  state.entanglement_groups.forEach((group, i) => group.forEach((sq) => groupOf.set(sq, i)));
+  state.entanglement_groups.forEach((group, i) => {
+    for (const sq of group) groupOf.set(sq, i);
+  });
 
   const ranks = flipped ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0];
   const files = flipped ? [7, 6, 5, 4, 3, 2, 1, 0] : [0, 1, 2, 3, 4, 5, 6, 7];
@@ -64,6 +66,7 @@ export function Board(props: BoardProps) {
             ];
             return (
               <button
+                type="button"
                 key={sq}
                 className={classes.join(" ")}
                 style={group !== undefined ? { ["--ring" as string]: GROUP_COLORS[group % GROUP_COLORS.length] } : {}}
@@ -75,10 +78,7 @@ export function Board(props: BoardProps) {
               >
                 {target && <span className={piece ? "hint capture" : "hint"} />}
                 {piece && (
-                  <span
-                    className={`piece ${piece.color}`}
-                    style={{ opacity: uncertain ? 0.3 + 0.7 * p : 1 }}
-                  >
+                  <span className={`piece ${piece.color}`} style={{ opacity: uncertain ? 0.3 + 0.7 * p : 1 }}>
                     {GLYPHS[piece.kind]}
                   </span>
                 )}
