@@ -1,12 +1,21 @@
 # Weekly update PRs for what is pinned: the workflows' actions (pinned to commits) and the UI's
 # npm packages. The Python lock files are regenerated with the command in their headers.
+#
+# Minor and patch updates arrive as one PR per ecosystem each week. Major updates keep a PR of
+# their own: they may need code changes, and shouldn't hold up the rest.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        update-types: ["minor", "patch"]
   - package-ecosystem: npm
     directory: /ui
     schedule:
       interval: weekly
+    groups:
+      ui:
+        update-types: ["minor", "patch"]
