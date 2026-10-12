@@ -405,9 +405,13 @@ export default function App() {
   return (
     <main className="app">
       <header>
-        <h1>
-          Quantum Chess <span className="muted">· superposition, entanglement, measurement</span>
-        </h1>
+        <div className="brand">
+          <img src="/favicon.svg" alt="" width="40" height="40" />
+          <div>
+            <h1>Quantum Chess</h1>
+            <p className="tagline">Superposition, entanglement, measurement</p>
+          </div>
+        </div>
         {!tutorial && (
           <div className="header-actions">
             {lessonsDone.length === 0 && <span className="muted small">New here?</span>}
