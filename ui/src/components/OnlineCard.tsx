@@ -12,7 +12,9 @@ interface OnlineCardProps {
   onCreate: (color: Color | "random") => void;
   /** Desktop only: join from an invite link. */
   onJoin: (link: string) => void;
-  /** Desktop only: stop accepting players from the network. */
+  /** Desktop only: also accept players from the internet. */
+  onShareOnline: () => Promise<void>;
+  /** Desktop only: stop accepting players from the network and the internet. */
   onStopHosting: () => void;
 }
 
@@ -25,8 +27,19 @@ export function inviteLink(gameId: string, base?: string | null): string {
 
 const short = (hex: string) => `${hex.slice(0, 10)}…`;
 
-export function OnlineCard({ state, seat, connected, busy, desktop, onCreate, onJoin, onStopHosting }: OnlineCardProps) {
+export function OnlineCard({
+  state,
+  seat,
+  connected,
+  busy,
+  desktop,
+  onCreate,
+  onJoin,
+  onShareOnline,
+  onStopHosting,
+}: OnlineCardProps) {
   const [color, setColor] = useState<Color | "random">("white");
+  const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [joinLink, setJoinLink] = useState("");
   const hosting = !!desktop?.ownPage;
@@ -36,7 +49,16 @@ export function OnlineCard({ state, seat, connected, busy, desktop, onCreate, on
   const hostingNote = hosting && desktop.lanUrl && (
     <div className="hosting">
       <p className="muted small">
-        Hosting at <code>{desktop.lanUrl}</code>. Anyone on this network can reach it until you stop.
+        {desktop.publicUrl ? (
+          <>
+            Hosting at <code>{desktop.lanUrl}</code> and on the internet at <code>{desktop.publicUrl}</code>. Anyone
+            with a link can join or watch your online games until you stop.
+          </>
+        ) : (
+          <>
+            Hosting at <code>{desktop.lanUrl}</code>. Anyone on this network can reach it until you stop.
+          </>
+        )}
       </p>
       <div className="buttons">
         <button onClick={onStopHosting} disabled={busy}>
@@ -101,7 +123,7 @@ export function OnlineCard({ state, seat, connected, busy, desktop, onCreate, on
     );
   }
 
-  const link = inviteLink(state.game_id, desktop?.lanUrl);
+  const link = inviteLink(state.game_id, desktop?.publicUrl ?? desktop?.lanUrl);
   const opponentHere = state.seats.white && state.seats.black;
   const over = !!state.winner || !!state.draw_reason;
   const fairness = state.fairness;
@@ -138,11 +160,31 @@ export function OnlineCard({ state, seat, connected, busy, desktop, onCreate, on
             <input readOnly value={link} aria-label="Invite link" onFocus={(e) => e.target.select()} />
             <button onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</button>
           </div>
-          {hosting ? (
-            <p className="muted small">
-              Your friend needs to be on the same network. If they can't connect, allow Quantum Chess through your
-              firewall, on private networks only.
-            </p>
+          {hosting && desktop.publicUrl ? (
+            <p className="muted small">This link works from anywhere while the app is open.</p>
+          ) : hosting ? (
+            <>
+              <p className="muted small">
+                This link works for a friend on the same network. If they can't connect, allow Quantum Chess through
+                your firewall, on private networks only.
+              </p>
+              <div className="buttons">
+                <button
+                  onClick={() => {
+                    setSharing(true);
+                    void onShareOnline().finally(() => setSharing(false));
+                  }}
+                  disabled={busy}
+                >
+                  {sharing ? "Opening internet link…" : "Get an internet link"}
+                </button>
+              </div>
+              <p className="muted small">
+                {sharing
+                  ? "This takes a few seconds. The first time, the app installs cloudflared, which can take a minute."
+                  : "For a friend somewhere else: a free, temporary Cloudflare link to your game."}
+              </p>
+            </>
           ) : (
             LOCAL_HOSTS.includes(window.location.hostname) && (
               <p className="muted small">
