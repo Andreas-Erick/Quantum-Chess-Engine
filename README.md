@@ -179,6 +179,10 @@ the same names: `POST /ai_move {"game_id": ..., "level": "hard"}`, and `GET /lev
 
 ## Privacy and security
 
+Quantum Chess is a hobby project: reviewed for security, but not professionally audited. Host
+games only with people you trust, and report problems privately as described in
+[SECURITY.md](SECURITY.md).
+
 - **No accounts, no tracking.** The app asks for no personal information, sends no analytics or
   crash reports, and never contacts a server of ours. Its only network traffic is the game itself,
   with a friend you host or join (relayed by Cloudflare if you use an internet link).
@@ -429,15 +433,18 @@ them after changing a requirements file, with the `uv pip compile` command in ea
   that matters; the desktop app's network listener refuses them outright.
 - There are no accounts: whoever holds a seat token plays that side, and anyone with the game
   link can watch.
-- Hosting from the desktop app reaches only the local network. Over the internet it needs a VPN
-  like Tailscale or a tunnel, or a deployed server; there is no built-in NAT traversal.
+- Playing over the internet from the desktop app goes through a Cloudflare quick tunnel, which
+  depends on Cloudflare's free service and relays the game's traffic. There is no direct
+  peer-to-peer connection.
 - Until signing certificates are added to the repository, the desktop builds are unsigned, so
   Windows SmartScreen and macOS Gatekeeper warn on first launch.
 
 ## Acknowledgements
 
 The move set and notation follow Chris Cantwell's *Quantum Chess*. The quantum simulation uses
-[Cirq](https://quantumai.google/cirq).
+[Cirq](https://quantumai.google/cirq). The app icon's knight is the ♞ glyph of
+[DejaVu Sans](https://dejavu-fonts.github.io/) ([license](https://dejavu-fonts.github.io/License.html)).
+Internet play uses [Cloudflare quick tunnels](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/).
 
 ## License
 
