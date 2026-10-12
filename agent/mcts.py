@@ -101,7 +101,7 @@ class MCTSAgent:
         return self.search(board).move
 
     def search(self, board: QuantumBoard) -> SearchResult:
-        if board.winner is not None:
+        if board.is_over:
             raise ValueError("the game is over")
         root_moves = board.legal_moves()
         if not root_moves:
@@ -138,7 +138,7 @@ class MCTSAgent:
     def _iterate(self, sim: QuantumBoard, root: _Node, rng: random.Random) -> None:
         path: list[tuple[_Node, int]] = []  # (node, player who moved into it)
         node = root
-        while sim.winner is None and not self._too_entangled(sim):
+        while not sim.is_over and not self._too_entangled(sim):
             legal = sim.legal_moves()
             if not legal:
                 break
@@ -212,7 +212,7 @@ class MCTSAgent:
 
     def _rollout(self, sim: QuantumBoard, rng: random.Random) -> float:
         for _ in range(self.rollout_depth):
-            if sim.winner is not None or self._too_entangled(sim):
+            if sim.is_over or self._too_entangled(sim):
                 break
             legal = sim.legal_moves()
             if not legal:

@@ -110,6 +110,38 @@ def test_split_of_superposed_piece_quarters_it():
     assert p(board, "e4") == pytest.approx(0.25)
 
 
+def test_quarter_piece_cannot_split_again():
+    board = QuantumBoard(KNIGHT_FEN)
+    for move in ("b1^a3c3", "e8d8", "c3^d5e4", "d8e8"):
+        board.do_move(move)
+    assert not board.can_split(sq("d5"))
+    assert board.can_split(sq("a3"))
+    with pytest.raises(IllegalMoveError, match="too uncertain"):
+        board.do_move("d5^c7f6")
+    legal = {m.notation() for m in board.legal_moves()}
+    assert not any(m.startswith(("d5^", "e4^")) for m in legal)
+    assert any(m.startswith("a3^") for m in legal)
+    assert "d5e3" in legal  # a quarter piece can still move
+
+
+def test_split_cap_follows_constant(monkeypatch):
+    monkeypatch.setattr("engine.board.MIN_SPLIT_FRAGMENT", 0.5)
+    board = QuantumBoard(KNIGHT_FEN)
+    board.do_move("b1^a3c3")
+    board.do_move("e8d8")
+    splits = [m for m in board.legal_moves() if m.move_type is MoveType.SPLIT]
+    assert splits and all(m.source == sq("e1") for m in splits)  # only the whole king
+
+
+def test_nested_split_merges_back_level_by_level():
+    board = QuantumBoard(KNIGHT_FEN)
+    for move in ("b1^a3c3", "e8d8", "c3^d5e4", "d8e8", "d5e4^c3", "e8d8", "a3c3^b1"):
+        board.do_move(move)
+    assert p(board, "b1") == pytest.approx(1.0)
+    assert board.is_classical(sq("b1"))
+    assert len(board.register) == 0
+
+
 @pytest.mark.parametrize(
     "fen,move",
     [

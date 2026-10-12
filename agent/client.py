@@ -42,7 +42,7 @@ def play(
 
     for _ in range(max_moves):
         state = client.get("/state", params={"game_id": game_id}).raise_for_status().json()
-        if state["winner"] is not None:
+        if state["winner"] is not None or state.get("draw_reason"):
             break
         if color != "both" and state["turn"] != color:
             time.sleep(poll_interval)
@@ -56,7 +56,10 @@ def play(
     else:
         state = client.get("/state", params={"game_id": game_id}).raise_for_status().json()
 
-    log(f"winner: {state['winner'] or 'none (move limit)'}")
+    if state.get("draw_reason"):
+        log(f"draw: {state['draw_reason']}")
+    else:
+        log(f"winner: {state['winner'] or 'none (move limit)'}")
     return state
 
 

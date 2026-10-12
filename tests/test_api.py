@@ -175,3 +175,16 @@ def test_serves_built_ui(tmp_path):
     ui_client = TestClient(create_app(ui_dir=tmp_path))
     assert "quantum chess ui" in ui_client.get("/").text
     assert ui_client.get("/health").json() == {"status": "ok"}  # API still wins
+
+
+def test_state_reports_check_and_draw(client):
+    state = new_game(client, fen="4r1k1/8/8/8/8/8/8/R3K3 w - - 98 1")
+    assert state["check"] == {"e1": 1.0}
+    assert state["draw_reason"] is None and state["halfmove_clock"] == 98
+    game_id = state["game_id"]
+    client.post("/do_move", json={"game_id": game_id, "notation": "e1d1"}).raise_for_status()
+    body = client.post("/do_move", json={"game_id": game_id, "notation": "g8h8"}).json()
+    assert body["state"]["draw_reason"] == "fifty-move rule"
+    assert body["state"]["winner"] is None
+    assert client.post("/do_move", json={"game_id": game_id, "notation": "d1c1"}).status_code == 409
+    assert client.post("/ai_move", json={"game_id": game_id}).status_code == 409

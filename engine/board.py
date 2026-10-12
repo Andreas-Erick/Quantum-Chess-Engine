@@ -9,12 +9,18 @@ Rules in this phase:
 * **Jump** (``e2e4``): an ordinary move. A superposed piece moving to an empty square carries
   its amplitude along (iSWAP) without being measured.
 * **Split** (``b1^a3c3``): a non-pawn piece moves to two empty squares at once, 50/50.
+  A piece already in superposition can split again, as long as each new part is at least
+  :data:`MIN_SPLIT_FRAGMENT` likely (100% -> 50% -> 25%, but no further by default).
 * **Merge** (``a3c3^b1``): two superposed parts of the same kind of piece recombine.
 * **Measurement** happens when a move needs to know whether a square is occupied: capturing
   or entering a superposed square, or capturing *with* a superposed piece. If the outcome makes
   the move impossible (the attacker was not there, or the target turned out to be your own
   piece), the move fails and the turn still passes.
-* There is no check: a game is won by capturing the enemy king. En passant is not supported.
+* There is no check: a game is won by capturing the enemy king. :meth:`QuantumBoard.king_threats`
+  reports which possible king squares the opponent could capture next move, so clients can warn
+  about "check". En passant is not supported.
+* **Draws**: after 100 plies (50 moves each) with no pawn move, capture or measurement, or when
+  only the two kings are left.
 * **Slide**: a jump whose path crosses possibly occupied squares. The piece moves only in the
   branches where the path is empty, so its position becomes entangled with the blockers'. A
   capture along such a path first measures whether the path is clear.
@@ -63,6 +69,11 @@ from engine.measurement import Measurement, PathMeasurement, ProbabilityResolver
 from engine.moves import MoveType, QuantumMove, merge_ops, slide_ops, split_ops
 from engine.register import QuantumRegister, square_qubit
 
+# A split halves the source's probability; no split may create a part less likely than this.
+MIN_SPLIT_FRAGMENT = 0.25
+FIFTY_MOVE_PLIES = 100
+_TOLERANCE = 1e-6
+
 
 class IllegalMoveError(ValueError):
     pass
@@ -92,9 +103,11 @@ class QuantumBoard:
         self.turn = classical.turn
         self.castling = classical.castling
         self.fullmove_number = classical.fullmove_number
+        self.halfmove_clock = classical.halfmove_clock
         self.register = QuantumRegister()
         self.resolver = ProbabilityResolver(rng)
         self.winner: Optional[int] = None
+        self.draw_reason: Optional[str] = None
         self.history: list[MoveResult] = []
 
     def copy(self, rng: Optional[RandomSource] = None) -> "QuantumBoard":
@@ -105,9 +118,11 @@ class QuantumBoard:
         clone.turn = self.turn
         clone.castling = self.castling
         clone.fullmove_number = self.fullmove_number
+        clone.halfmove_clock = self.halfmove_clock
         clone.register = self.register.copy()
         clone.resolver = ProbabilityResolver(rng)
         clone.winner = self.winner
+        clone.draw_reason = self.draw_reason
         clone.history = list(self.history)
         return clone
 
@@ -129,6 +144,10 @@ class QuantumBoard:
         return board
 
     # --- Queries ---------------------------------------------------------------------
+
+    @property
+    def is_over(self) -> bool:
+        return self.winner is not None or self.draw_reason is not None
 
     def piece_at(self, sq: int) -> Optional[Piece]:
         """The piece that may be on ``sq`` (see :meth:`probability` for how likely)."""
@@ -158,6 +177,25 @@ class QuantumBoard:
             elif (self.labels[sq] is not None) != occupied:
                 return 0.0
         return self.register.joint_probability(quantum) if quantum else 1.0
+
+    def king_threats(self, color: Optional[int] = None) -> dict[int, float]:
+        """Squares where ``color``'s king may be (default: side to move) that an enemy piece
+        could try to capture on its next move, mapped to the king's probability of being there.
+
+        This is quantum chess's version of "check". A threat can still miss: the king may not
+        be on that square, or the attacker or its path may collapse the wrong way.
+        """
+        color = self.turn if color is None else color
+        kings = [sq for sq, p in enumerate(self.labels) if p == Piece(color, KING)]
+        attacked = 0
+        for src, piece in enumerate(self.labels):
+            if piece is not None and piece.color != color:
+                attacked |= self.reachable(src)
+        return {sq: self.probability(sq) for sq in kings if attacked & bit(sq)}
+
+    def can_split(self, sq: int) -> bool:
+        """Whether the piece on ``sq`` is likely enough to be there to split once more."""
+        return self.probability(sq) / 2 >= MIN_SPLIT_FRAGMENT - _TOLERANCE
 
     def conditional_probabilities(self, sq: int, occupied: bool = True) -> dict[int, float]:
         """Occupancy of every square entangled with ``sq``, given ``sq``'s occupancy.
@@ -269,7 +307,7 @@ class QuantumBoard:
         return piece
 
     def validate(self, move: QuantumMove) -> None:
-        if self.winner is not None:
+        if self.is_over:
             raise IllegalMoveError("the game is over")
         piece = self._own_piece(move.source)
 
@@ -292,6 +330,10 @@ class QuantumBoard:
         if move.move_type is MoveType.SPLIT:
             if move.target == move.target2:
                 raise IllegalMoveError("split targets must differ")
+            if not self.can_split(move.source):
+                raise IllegalMoveError(
+                    f"{piece.symbol} on {square_name(move.source)} is too uncertain to split again"
+                )
             reach = self.reachable(move.source, slide=False)
             for t in (move.target, move.target2):
                 if not reach & bit(t) or self.labels[t] is not None:
@@ -310,7 +352,7 @@ class QuantumBoard:
             raise IllegalMoveError(f"cannot merge onto {square_name(move.target)}")
 
     def legal_moves(self) -> list[QuantumMove]:
-        if self.winner is not None:
+        if self.is_over:
             return []
         moves: list[QuantumMove] = []
         superposed: dict[Piece, list[int]] = {}
@@ -326,9 +368,10 @@ class QuantumBoard:
                     moves.append(QuantumMove.jump(src, dst))
             if piece.kind == PAWN:
                 continue
-            strict = self.reachable(src, slide=False)
-            empty = [t for t in iter_squares(strict) if self.labels[t] is None]
-            moves.extend(QuantumMove.split(src, a, b) for a, b in combinations(empty, 2))
+            if self.can_split(src):
+                strict = self.reachable(src, slide=False)
+                empty = [t for t in iter_squares(strict) if self.labels[t] is None]
+                moves.extend(QuantumMove.split(src, a, b) for a, b in combinations(empty, 2))
             if not self.is_classical(src):
                 superposed.setdefault(piece, []).append(src)
         for squares in superposed.values():
@@ -347,6 +390,7 @@ class QuantumBoard:
         if isinstance(move, str):
             move = QuantumMove.parse(move)
         self.validate(move)
+        mover = self.labels[move.source]
 
         if move.move_type is MoveType.SPLIT:
             result = self._split(move)
@@ -358,6 +402,11 @@ class QuantumBoard:
         if result.executed:
             for sq in move.squares:
                 self.castling &= ~CASTLING_MASK[sq]
+        pawn_moved = mover.kind == PAWN and result.executed
+        if pawn_moved or result.captured is not None or result.measurements:
+            self.halfmove_clock = 0
+        else:
+            self.halfmove_clock += 1
         self._update_winner()
         result.winner = self.winner
         if self.turn == BLACK:
@@ -496,6 +545,12 @@ class QuantumBoard:
         for color in (WHITE, BLACK):
             if Piece(color, KING) not in self.labels:
                 self.winner = color ^ 1
+        if self.winner is not None:
+            return
+        if all(p is None or p.kind == KING for p in self.labels):
+            self.draw_reason = "insufficient material"
+        elif self.halfmove_clock >= FIFTY_MOVE_PLIES:
+            self.draw_reason = "fifty-move rule"
 
     # --- Display ---------------------------------------------------------------------
 

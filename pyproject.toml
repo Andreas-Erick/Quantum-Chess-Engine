@@ -3,6 +3,7 @@ name = "quantum-chess"
 version = "0.1.0"
 description = "Chess with superposition, entanglement and measurement, simulated with Cirq."
 requires-python = ">=3.10"
+license = { text = "MIT" }
 
 [tool.black]
 line-length = 100

@@ -172,6 +172,11 @@ h2 {
   background: rgb(255 214 0 / 22%);
 }
 
+.square.check {
+  box-shadow: inset 0 0 0 3px var(--danger);
+  background-image: radial-gradient(circle, rgb(196 49 75 / 45%) 0%, transparent 70%);
+}
+
 .square[data-group]::after {
   content: "";
   position: absolute;
@@ -328,7 +333,8 @@ h2 {
   color: var(--ok);
 }
 
-.error {
+.error,
+.check-warning {
   color: var(--danger);
 }
 

@@ -88,6 +88,15 @@ class GameState(BaseModel):
     initial_fen: str
     turn: Color
     winner: Optional[Color]
+    draw_reason: Optional[str] = Field(
+        None, description='Why the game was drawn ("fifty-move rule", "insufficient material")'
+    )
+    check: dict[SquareName, float] = Field(
+        default_factory=dict,
+        description="Squares where the mover's king may be that the opponent could capture next "
+        "move, mapped to the king's probability of being there",
+    )
+    halfmove_clock: int = Field(0, description="Plies since a pawn move, capture or measurement")
     probabilities: list[float] = Field(description="64 occupancy probabilities, a1..h8")
     pieces: list[PieceInfo]
     entanglement_groups: list[list[SquareName]]
