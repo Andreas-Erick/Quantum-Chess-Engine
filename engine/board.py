@@ -76,10 +76,18 @@ class MoveResult:
     captured: Optional[Piece] = None
     winner: Optional[int] = None
 
+    @property
+    def outcomes(self) -> list[bool]:
+        """Measurement outcomes in order (occupied / path clear): enough to replay the move."""
+        return [
+            m.clear if isinstance(m, PathMeasurement) else m.occupied for m in self.measurements
+        ]
+
 
 class QuantumBoard:
     def __init__(self, fen: str = STARTING_FEN, rng: Optional[RandomSource] = None) -> None:
         classical = ClassicalBoard(fen)
+        self.initial_fen = fen
         self.labels: list[Optional[Piece]] = list(classical.mailbox)
         self.turn = classical.turn
         self.castling = classical.castling
@@ -88,6 +96,37 @@ class QuantumBoard:
         self.resolver = ProbabilityResolver(rng)
         self.winner: Optional[int] = None
         self.history: list[MoveResult] = []
+
+    def copy(self, rng: Optional[RandomSource] = None) -> "QuantumBoard":
+        """An independent copy for search. Measurements in the copy use ``rng``."""
+        clone = QuantumBoard.__new__(QuantumBoard)
+        clone.initial_fen = self.initial_fen
+        clone.labels = list(self.labels)
+        clone.turn = self.turn
+        clone.castling = self.castling
+        clone.fullmove_number = self.fullmove_number
+        clone.register = self.register.copy()
+        clone.resolver = ProbabilityResolver(rng)
+        clone.winner = self.winner
+        clone.history = list(self.history)
+        return clone
+
+    @classmethod
+    def replay(
+        cls, fen: str, records: list[tuple[str, list[bool]]], rng: Optional[RandomSource] = None
+    ) -> "QuantumBoard":
+        """Rebuild a game from its moves and their measurement outcomes.
+
+        Because outcomes are recorded, the replay reproduces the exact quantum state, so a
+        client that only sees the JSON history can reconstruct the board.
+        """
+        board = cls(fen, rng=rng)
+        for notation, outcomes in records:
+            board.resolver.forced.extend(outcomes)
+            result = board.do_move(notation)
+            if board.resolver.forced or result.outcomes != list(outcomes):
+                raise ValueError(f"history does not replay at move {notation}")
+        return board
 
     # --- Queries ---------------------------------------------------------------------
 
