@@ -22,10 +22,12 @@ from starlette.concurrency import run_in_threadpool
 
 from agent.levels import DEFAULT_LEVEL, LEVELS
 from agent.mcts import MCTSAgent, SearchResult
+from api.fairness import SeededDice, commitment, new_secret
 from api.schemas import (
     AIMoveRequest,
     AIMoveResponse,
     CorrelationsResponse,
+    FairnessInfo,
     GameState,
     HistoryEntry,
     InitRequest,
@@ -58,6 +60,9 @@ class Game:
     lock: threading.Lock = field(default_factory=threading.Lock)
     # Online games only: colour -> seat token, or None while the seat is open.
     seats: Optional[dict[str, Optional[str]]] = None
+    # Online games only: the server's share of the dice, and the joiner's once they join.
+    secret: Optional[str] = None
+    guest_seed: Optional[str] = None
     # Live feeds (/ws): each is a queue owned by an event loop. Guarded by ``lock``.
     subscribers: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = field(default_factory=list)
 
@@ -66,8 +71,20 @@ class Game:
             return None
         return {color: token is not None for color, token in self.seats.items()}
 
+    def fairness(self) -> Optional[FairnessInfo]:
+        if self.secret is None:
+            return None
+        return FairnessInfo(
+            commitment=commitment(self.secret),
+            guest_seed=self.guest_seed,
+            # Revealing earlier would let anyone predict the remaining outcomes.
+            secret=self.secret if self.board.is_over else None,
+        )
+
     def state(self, game_id: str) -> GameState:
-        return serialize_state(game_id, self.board, self.seat_info())
+        state = serialize_state(game_id, self.board, self.seat_info())
+        state.fairness = self.fairness()
+        return state
 
     def publish(self, message: dict) -> None:
         """Push a message to every live feed. Call with ``lock`` held, so feeds see moves in
@@ -82,6 +99,9 @@ class Game:
         """In an online game, only the player holding the seat of the side to move may move."""
         if self.seats is None:
             return
+        if None in self.seats.values():
+            # Also keeps the dice unrolled until the joiner has contributed their seed.
+            raise HTTPException(status_code=409, detail="waiting for the other player to join")
         expected = self.seats[COLOR_NAMES[self.board.turn]]
         if expected is None or token is None or not secrets.compare_digest(token, expected):
             raise HTTPException(status_code=403, detail="it is not your turn in this game")
@@ -96,7 +116,10 @@ class GameStore:
 
     def create(self, board: QuantumBoard, online: bool = False) -> str:
         game_id = uuid.uuid4().hex[:12]
-        game = Game(board, seats={"white": None, "black": None} if online else None)
+        game = Game(board)
+        if online:
+            game.seats = {"white": None, "black": None}
+            game.secret = new_secret()
         with self._lock:
             self._games[game_id] = game
         return game_id
@@ -310,9 +333,7 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
     def online_create(request: Optional[OnlineCreateRequest] = None) -> SeatResponse:
         request = request or OnlineCreateRequest()
         try:
-            board = QuantumBoard(
-                request.fen or STARTING_FEN, rng=np.random.default_rng(request.seed)
-            )
+            board = QuantumBoard(request.fen or STARTING_FEN)  # dice are seeded on join
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         color = request.color
@@ -336,6 +357,8 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
                 raise HTTPException(status_code=409, detail="both seats are taken")
             color = open_seats[0]
             token = game.seats[color] = secrets.token_urlsafe(16)
+            game.guest_seed = request.seed or secrets.token_hex(32)
+            game.board.resolver.rng = SeededDice(game.secret, game.guest_seed)
             state = game.state(request.game_id)
             game.publish({"type": "state", "state": state.model_dump(mode="json")})
         return SeatResponse(game_id=request.game_id, color=color, token=token, state=state)

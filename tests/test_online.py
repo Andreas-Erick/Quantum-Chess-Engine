@@ -68,9 +68,9 @@ def test_only_the_side_to_move_may_move(client):
     assert move(client, game_id, "e7e5", guest["token"]).status_code == 200
 
 
-def test_cannot_move_for_an_empty_seat(client):
-    host = create(client, color="black")
-    assert move(client, host["game_id"], "e2e4", host["token"]).status_code == 403
+def test_no_moves_until_both_players_are_seated(client):
+    host = create(client, color="white")
+    assert move(client, host["game_id"], "e2e4", host["token"]).status_code == 409
 
 
 def test_no_ai_in_online_games(client):
