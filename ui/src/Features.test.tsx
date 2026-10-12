@@ -206,10 +206,14 @@ describe("desktop app", () => {
     const calls: string[] = [];
     window.pywebview = {
       api: {
-        info: async () => ({ own_page: ownPage, lan_url: null }),
+        info: async () => ({ own_page: ownPage, lan_url: null, public_url: null }),
         host: async () => {
           calls.push("host");
           return "http://192.168.1.20:5555";
+        },
+        share_online: async () => {
+          calls.push("share");
+          return "https://quiet-fox.trycloudflare.com";
         },
         stop_hosting: async () => {
           calls.push("stop");
@@ -250,6 +254,35 @@ describe("desktop app", () => {
     });
     expect(calls).toEqual(["host", "stop"]);
     expect(screen.queryByRole("button", { name: "Stop hosting" })).toBeNull();
+  });
+
+  it("shares a hosted game on the internet, so the invite link points at the tunnel", async () => {
+    const calls = bridge(true);
+    serve((url) => {
+      if (url.startsWith("/init")) return { ...base, game_id: "local" };
+      if (url.startsWith("/levels")) return [];
+      if (url.startsWith("/legal_moves")) return { moves: [] };
+      if (url.startsWith("/online/create")) return { game_id: "g9", color: "white", token: "t", state: online };
+    });
+    await renderApp();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Host a game" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Get an internet link" }));
+    });
+    expect(calls).toEqual(["host", "share"]);
+    expect((screen.getByLabelText("Invite link") as HTMLInputElement).value).toBe(
+      "https://quiet-fox.trycloudflare.com/?join=g9",
+    );
+    expect(screen.getByText(/works from anywhere/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Get an internet link" })).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Stop hosting" }));
+    });
+    expect(calls).toEqual(["host", "share", "stop"]);
+    expect(screen.queryByText(/trycloudflare/)).toBeNull();
   });
 
   it("joins a friend's game through the app", async () => {

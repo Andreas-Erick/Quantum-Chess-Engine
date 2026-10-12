@@ -61,7 +61,7 @@ export default function App() {
   const [seat, setSeat] = useState<Seat | null>(null);
   const [tutorial, setTutorial] = useState<TutorialProgress | null>(null);
   const [lessonsDone, setLessonsDone] = useState<string[]>(() => storage.lessonsDone());
-  const [desktop, setLanUrl] = useDesktop();
+  const [desktop, setHosting] = useDesktop();
   const hoverToken = useRef(0);
   const started = useRef(false);
   const aiInFlight = useRef(false);
@@ -153,7 +153,7 @@ export default function App() {
     run(async () => {
       // In the desktop app, start listening on the local network first: the invite link
       // must point at an address the friend can reach.
-      if (desktop?.ownPage) setLanUrl(await desktop.api.host());
+      if (desktop?.ownPage) setHosting({ lanUrl: await desktop.api.host() });
       const created = await api.createOnline(color);
       storage.setSeat(created.game_id, { color: created.color, token: created.token });
       storage.setGameId(created.game_id);
@@ -565,10 +565,16 @@ export default function App() {
             desktop={desktop}
             onCreate={createOnline}
             onJoin={(link) => void run(async () => desktop?.api.join(link))}
+            onShareOnline={() =>
+              run(async () => {
+                const publicUrl = await desktop?.api.share_online();
+                if (publicUrl) setHosting({ publicUrl });
+              })
+            }
             onStopHosting={() =>
               void run(async () => {
                 await desktop?.api.stop_hosting();
-                setLanUrl(null);
+                setHosting({ lanUrl: null, publicUrl: null });
               })
             }
           />
