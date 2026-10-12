@@ -35,8 +35,18 @@ from urllib.parse import parse_qs, urlsplit
 APP_NAME = "Quantum Chess"
 
 # Endpoints the network listener refuses: each starts a game or an AI search on the host's
-# computer, which only the host should be able to do.
-HOST_ONLY_PATHS = frozenset({"/init", "/ai_move", "/online/create"})
+# computer, which only the host should be able to do. Guests don't need the API docs either.
+HOST_ONLY_PATHS = frozenset(
+    {
+        "/init",
+        "/ai_move",
+        "/online/create",
+        "/docs",
+        "/docs/oauth2-redirect",
+        "/redoc",
+        "/openapi.json",
+    }
+)
 
 
 def bundle_dir() -> Path:
@@ -123,6 +133,33 @@ class GuestsOnly:
             detail = "Only the host can start games here. Ask them for an invite link."
             await JSONResponse({"detail": detail}, status_code=403)(scope, receive, send)
             return
+        if scope["type"] in ("http", "websocket"):
+            from api.server import GUEST
+
+            scope = {**scope, GUEST: True}  # online games only (see api.server.GameStore.get)
+        await self.app(scope, receive, send)
+
+
+class LocalOnly:
+    """The app on 127.0.0.1, answering only requests addressed to it. A web page in the
+    player's browser could otherwise reach it through a domain that resolves to 127.0.0.1
+    (DNS rebinding) and start games or AI searches here."""
+
+    def __init__(self, app: Any, port: int) -> None:
+        self.app = app
+        self.hosts = {f"127.0.0.1:{port}".encode(), f"localhost:{port}".encode()}
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] in ("http", "websocket"):
+            host = dict(scope.get("headers") or []).get(b"host", b"").lower()
+            if host not in self.hosts:
+                if scope["type"] == "websocket":
+                    await send({"type": "websocket.close", "code": 4403})
+                    return
+                from starlette.responses import PlainTextResponse
+
+                await PlainTextResponse("Unknown host", status_code=421)(scope, receive, send)
+                return
         await self.app(scope, receive, send)
 
 
@@ -313,8 +350,10 @@ class Desktop:
             self._window.load_url(self._home_url)
 
     # --- Menu ------------------------------------------------------------------------
+    # Private, so pages can't call it: pywebview hands every public method to the page, and a
+    # host's page could open the dialog over and over.
 
-    def verify_current(self) -> None:
+    def _verify_current(self) -> None:
         """Check the open game's dice and say so in a native dialog the page can't fake."""
         import httpx
 
@@ -378,7 +417,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             )
         app = create_app(ui_dir=ui_dir)
         port = args.port or free_port("127.0.0.1")
-        start_server("127.0.0.1", port, app)
+        start_server("127.0.0.1", port, LocalOnly(app, port))
         url = f"http://127.0.0.1:{port}/"
         desktop = Desktop(app, url, joined)
         print(f"{APP_NAME} is running at {url}")
@@ -404,7 +443,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             [
                 MenuAction("My games", desktop.home),
                 MenuSeparator(),
-                MenuAction("Verify this game's dice", desktop.verify_current),
+                MenuAction("Verify this game's dice", desktop._verify_current),
             ],
         )
     ]

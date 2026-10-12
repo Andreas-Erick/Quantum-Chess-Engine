@@ -21,7 +21,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import IO, Optional, Sequence
+from typing import IO, Any, Optional, Sequence
 
 PUBLIC_URL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 START_TIMEOUT = 45.0  # seconds; a quick tunnel usually takes 5 to 15
@@ -46,10 +46,10 @@ def _known_locations() -> list[Path]:
 
 
 def find_cloudflared() -> Optional[str]:
-    found = shutil.which("cloudflared")
-    if found:
-        return found
-    return next((str(p) for p in _known_locations() if p.is_file()), None)
+    # Installers' own folders first: the PATH (or, on Windows, the current folder) could hold
+    # something else named cloudflared.
+    known = next((str(p) for p in _known_locations() if p.is_file()), None)
+    return known or shutil.which("cloudflared")
 
 
 def install_cloudflared() -> str:
@@ -81,6 +81,60 @@ def install_cloudflared() -> str:
     return path
 
 
+def _close_with_this_process(process: subprocess.Popen) -> Any:
+    """Windows: put the process in a job that Windows closes when this one exits, even by a
+    crash, so the tunnel can't outlive the app and later forward to another program on the
+    same port. Returns the job's handle, which must stay open until then."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class Basic(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", ctypes.c_int64),
+            ("PerJobUserTimeLimit", ctypes.c_int64),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ctypes.c_size_t),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class Extended(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", Basic),
+            ("IoInfo", ctypes.c_ulonglong * 6),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    kill_on_job_close, extended_limit_information = 0x2000, 9
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD
+    ]  # fmt: skip
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    job = kernel32.CreateJobObjectW(None, None)
+    info = Extended()
+    info.BasicLimitInformation.LimitFlags = kill_on_job_close
+    if not (
+        job
+        and kernel32.SetInformationJobObject(
+            job, extended_limit_information, ctypes.byref(info), ctypes.sizeof(info)
+        )
+        and kernel32.AssignProcessToJobObject(job, int(process._handle))
+    ):
+        raise TunnelError("Could not tie the internet link to the app, so it wasn't opened.")
+    return job
+
+
 def _read_lines(stream: IO[str], lines: "queue.Queue[str]") -> None:
     # Keep reading after the address shows up: a full pipe would stall cloudflared.
     for line in stream:
@@ -94,6 +148,7 @@ class Tunnel:
         self.port = port
         self._command = list(command) if command else None
         self._process: Optional[subprocess.Popen] = None
+        self._job: Any = None
         self.url: Optional[str] = None
 
     def start(self, timeout: float = START_TIMEOUT) -> str:
@@ -113,6 +168,11 @@ class Tunnel:
             )
         except OSError as exc:
             raise TunnelError(f"Could not start cloudflared: {exc}") from exc
+        try:
+            self._job = _close_with_this_process(self._process)
+        except TunnelError:
+            self.stop()
+            raise
 
         lines: "queue.Queue[str]" = queue.Queue()
         assert self._process.stderr is not None
@@ -145,3 +205,11 @@ class Tunnel:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 process.kill()
+        job, self._job = self._job, None
+        if job:
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32")
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle(job)
