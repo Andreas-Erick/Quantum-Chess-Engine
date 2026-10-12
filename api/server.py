@@ -17,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from agent.levels import DEFAULT_LEVEL, LEVELS
 from agent.mcts import MCTSAgent, SearchResult
 from api.schemas import (
     AIMoveRequest,
@@ -26,6 +27,7 @@ from api.schemas import (
     HistoryEntry,
     InitRequest,
     LegalMovesResponse,
+    LevelInfo,
     MeasurementInfo,
     MoveRequest,
     MoveResponse,
@@ -199,6 +201,18 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
                 ),
             )
 
+    @app.get("/levels", response_model=list[LevelInfo])
+    def levels() -> list[LevelInfo]:
+        return [
+            LevelInfo(
+                name=level.name,
+                label=level.label,
+                description=level.description,
+                default=level.name == DEFAULT_LEVEL,
+            )
+            for level in LEVELS.values()
+        ]
+
     @app.get("/legal_moves", response_model=LegalMovesResponse)
     def legal_moves(game_id: str = Query(...)) -> LegalMovesResponse:
         game = store.get(game_id)
@@ -224,12 +238,15 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
         with game.lock:
             if game.board.is_over:
                 raise HTTPException(status_code=409, detail="the game is over")
-            agent = MCTSAgent(
-                iterations=request.iterations,
-                rollout_depth=request.rollout_depth,
-                time_limit=request.time_limit,
-                seed=request.seed,
-            )
+            if request.level is not None:
+                agent = LEVELS[request.level].agent(seed=request.seed)
+            else:
+                agent = MCTSAgent(
+                    iterations=request.iterations,
+                    rollout_depth=request.rollout_depth,
+                    time_limit=request.time_limit,
+                    seed=request.seed,
+                )
             search = agent.search(game.board)
             result = game.board.do_move(search.move)
             return AIMoveResponse(

@@ -12,7 +12,7 @@ Iterations:
 2. **Expansion**: add one untried move. Quantum chess has a huge branching factor (a queen
    alone has ~200 possible splits), so nodes use *progressive widening*: moves are ordered
    (captures by value first, then ordinary moves interleaved with quantum ones) and a node
-   considers only its first ~2*sqrt(visits) candidates.
+   considers only its first ~0.7*sqrt(visits) candidates (tuned in the arena).
 3. **Simulation**: play a short, capture-biased random rollout, sampling every measurement.
 4. **Evaluation & backpropagation**: score the result with the probability-weighted heuristic
    (or 1/0 if a king fell) and update every node on the path.
@@ -72,7 +72,7 @@ class MCTSAgent:
         capture_bias: float = 0.5,
         quantum_rate: float = 0.15,
         max_group_qubits: int = 12,
-        widening: float = 2.0,
+        widening: float = 0.7,
         root_lookahead: bool = True,
         time_limit: Optional[float] = None,
         seed: Optional[int] = None,

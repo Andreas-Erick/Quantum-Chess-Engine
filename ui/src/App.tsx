@@ -3,9 +3,10 @@ import { api } from "./api";
 import { Board, GROUP_COLORS } from "./components/Board";
 import { type LogEntry, MoveLog } from "./components/MoveLog";
 import { completedMove, type Mode, nextSquares, parseMove, type ParsedMove } from "./moves";
-import type { Color, Correlations, GameState, MoveResponse } from "./types";
+import type { Color, Correlations, GameState, LevelInfo, LevelName, MoveResponse } from "./types";
 
 const STORAGE_KEY = "quantum-chess:game-id";
+const LEVEL_KEY = "quantum-chess:level";
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: "jump", label: "Move", hint: "piece → square" },
@@ -21,6 +22,23 @@ function readStored(): string | null {
     return localStorage.getItem(STORAGE_KEY);
   } catch {
     return null;
+  }
+}
+
+function readLevel(): LevelName | null {
+  try {
+    const stored = localStorage.getItem(LEVEL_KEY);
+    return stored === "easy" || stored === "medium" || stored === "hard" ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeLevel(level: LevelName) {
+  try {
+    localStorage.setItem(LEVEL_KEY, level);
+  } catch {
+    // storage unavailable: the level resets to the default next visit
   }
 }
 
@@ -54,7 +72,8 @@ export default function App() {
   const [picked, setPicked] = useState<string[]>([]);
   const [promotion, setPromotion] = useState("q");
   const [aiColor, setAiColor] = useState<Color | null>("black");
-  const [iterations, setIterations] = useState(300);
+  const [levels, setLevels] = useState<LevelInfo[]>([]);
+  const [level, setLevel] = useState<LevelName>(() => readLevel() ?? "medium");
   const [flipped, setFlipped] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +99,16 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }, []);
+
+  useEffect(() => {
+    api
+      .levels()
+      .then((list) => {
+        setLevels(list);
+        if (!readLevel()) setLevel(list.find((l) => l.default)?.name ?? "medium");
+      })
+      .catch(() => setLevels([]));
   }, []);
 
   // Resume the last game if the server still has it, otherwise start a new one.
@@ -162,7 +191,7 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const response = await api.aiMove(gameId, iterations);
+      const response = await api.aiMove(gameId, level);
       applyResponse(response, response.search);
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
@@ -170,7 +199,7 @@ export default function App() {
       aiInFlight.current = false;
       setBusy(false);
     }
-  }, [gameId, iterations, applyResponse]);
+  }, [gameId, level, applyResponse]);
 
   // Let the AI answer automatically when it is its turn.
   useEffect(() => {
@@ -315,18 +344,27 @@ export default function App() {
               <option value="none">Nobody</option>
             </select>
           </label>
-          <label className="row">
-            AI strength
-            <input
-              type="range"
-              min={50}
-              max={1500}
-              step={50}
-              value={iterations}
-              onChange={(e) => setIterations(Number(e.target.value))}
-            />
-            <span className="muted num">{iterations}</span>
-          </label>
+          {levels.length > 0 && (
+            <>
+              <div className="modes levels" role="radiogroup" aria-label="AI strength">
+                {levels.map((l) => (
+                  <button
+                    key={l.name}
+                    role="radio"
+                    aria-checked={level === l.name}
+                    className={level === l.name ? "active" : ""}
+                    onClick={() => {
+                      setLevel(l.name);
+                      storeLevel(l.name);
+                    }}
+                  >
+                    <strong>{l.label}</strong>
+                  </button>
+                ))}
+              </div>
+              <p className="muted level-hint">{levels.find((l) => l.name === level)?.description}</p>
+            </>
+          )}
           <div className="buttons">
             <button onClick={() => void aiMove()} disabled={busy || isOver(state)}>
               AI move now

@@ -25,6 +25,15 @@ export interface HistoryEntry {
   outcomes: boolean[];
 }
 
+export type LevelName = "easy" | "medium" | "hard";
+
+export interface LevelInfo {
+  name: LevelName;
+  label: string;
+  description: string;
+  default: boolean;
+}
+
 export interface GameState {
   game_id: string;
   initial_fen: string;

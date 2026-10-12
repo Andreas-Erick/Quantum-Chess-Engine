@@ -188,3 +188,22 @@ def test_state_reports_check_and_draw(client):
     assert body["state"]["winner"] is None
     assert client.post("/do_move", json={"game_id": game_id, "notation": "d1c1"}).status_code == 409
     assert client.post("/ai_move", json={"game_id": game_id}).status_code == 409
+
+
+def test_levels_listed_with_one_default(client):
+    levels = client.get("/levels").json()
+    assert [level["name"] for level in levels] == ["easy", "medium", "hard"]
+    assert [level["name"] for level in levels if level["default"]] == ["medium"]
+
+
+def test_ai_move_by_level(client):
+    game_id = new_game(client)["game_id"]
+    body = client.post("/ai_move", json={"game_id": game_id, "level": "easy", "seed": 0}).json()
+    assert body["executed"] in (True, False)
+    assert body["search"]["iterations"] == 40  # the easy preset
+
+
+def test_unknown_level_rejected(client):
+    game_id = new_game(client)["game_id"]
+    response = client.post("/ai_move", json={"game_id": game_id, "level": "grandmaster"})
+    assert response.status_code == 422

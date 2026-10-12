@@ -90,6 +90,10 @@ only the two kings are left.
 move are highlighted. Hover an uncertain square to see how every square entangled with it depends
 on it: ● is its probability if the hovered square is occupied, ○ if it is empty.
 
+**AI strength.** Choose Easy, Medium or Hard in the Game panel. Easy searches briefly and misses
+threats; Medium (the default) looks one move ahead; Hard thinks longer and deeper. The API takes
+the same names: `POST /ai_move {"game_id": ..., "level": "hard"}`, and `GET /levels` lists them.
+
 ## How it works
 
 ```mermaid
@@ -136,7 +140,7 @@ Minimax breaks down when every capture can branch on a random outcome. The agent
 of the position with newly sampled measurements. The statistics on each node therefore average
 over the quantum dice.
 
-- **Progressive widening.** A node considers about 2·√visits candidates, so a queen's ~200
+- **Progressive widening.** A node considers about 0.7·√visits candidates, so a queen's ~200
   possible splits don't drown out the good moves. At the root, every move is first played on a
   copy and scored one move ahead, so the search starts with the most promising moves and moves
   that hang the king sink to the bottom. Deeper nodes order captures by expected value, then
@@ -200,6 +204,7 @@ print(board.probabilities())        # 64 occupancy probabilities, a1..h8
 ```bash
 python -m agent.client --url http://localhost:8000 --color both                 # self-play
 python -m agent.client --url http://localhost:8000 --game-id ID --color black   # join a game
+python -m agent.client --level hard --color white                               # pick a level
 docker compose --profile demo up --build                                        # API + self-play
 ```
 
@@ -247,9 +252,10 @@ python -m agent.arena --games 40 --a iterations=400 --b iterations=100   # agent
 
 ## Limitations and next steps
 
-- The AI looks ahead only a few moves and still loses to deeper tactics. Measured in the arena,
-  the threat-aware evaluation and root lookahead beat the previous agent 82% of the time (160
-  games, equal iterations and time per move).
+- The AI looks ahead only a few moves and still loses to deeper tactics. Measured in the arena:
+  the threat-aware evaluation and root lookahead beat the original agent 82% of the time (160
+  games, equal iterations), and narrowing progressive widening from 2·√n to 0.7·√n added another
+  83% (96 games). Medium beats Easy 92% and Hard beats Medium 74%.
 - En passant is not available in quantum play, and pawns cannot split.
 - Games are stored in memory; a restart clears them. Redis or a database would make the API
   stateless.

@@ -15,6 +15,7 @@ from typing import Optional
 
 import httpx
 
+from agent.levels import DEFAULT_LEVEL, LEVELS
 from agent.mcts import MCTSAgent
 from engine.board import QuantumBoard
 
@@ -68,12 +69,16 @@ def main() -> None:
     parser.add_argument("--url", default="http://localhost:8000")
     parser.add_argument("--game-id")
     parser.add_argument("--color", choices=["white", "black", "both"], default="both")
-    parser.add_argument("--iterations", type=int, default=300)
+    parser.add_argument("--level", choices=list(LEVELS), default=DEFAULT_LEVEL)
+    parser.add_argument("--iterations", type=int, help="tune the search instead of a level")
     parser.add_argument("--max-moves", type=int, default=200)
     parser.add_argument("--seed", type=int)
     args = parser.parse_args()
 
-    agent = MCTSAgent(iterations=args.iterations, seed=args.seed)
+    if args.iterations is not None:
+        agent = MCTSAgent(iterations=args.iterations, seed=args.seed)
+    else:
+        agent = LEVELS[args.level].agent(seed=args.seed)
     with httpx.Client(base_url=args.url, timeout=60) as client:
         play(client, agent, args.game_id, args.color, args.max_moves)
 
