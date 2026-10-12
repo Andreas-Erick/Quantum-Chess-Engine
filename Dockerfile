@@ -1,3 +1,12 @@
+# --- Build the visualizer -------------------------------------------------------------
+FROM node:24-slim AS ui
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+COPY ui/ ./
+RUN npm run build
+
+# --- API + engine + agent, serving the built UI ------------------------------------------
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -11,6 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY engine/ engine/
 COPY agent/ agent/
 COPY api/ api/
+COPY --from=ui /ui/dist ui/dist
 
 RUN useradd --create-home appuser
 USER appuser

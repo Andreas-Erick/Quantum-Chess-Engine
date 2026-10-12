@@ -159,6 +159,22 @@ class QuantumBoard:
                 return 0.0
         return self.register.joint_probability(quantum) if quantum else 1.0
 
+    def conditional_probabilities(self, sq: int, occupied: bool = True) -> dict[int, float]:
+        """Occupancy of every square entangled with ``sq``, given ``sq``'s occupancy.
+
+        Squares outside ``sq``'s entanglement group are unaffected and omitted.
+        """
+        if sq not in self.register:
+            return {}
+        given = self.register.probability(sq)
+        given = given if occupied else 1.0 - given
+        group = next(g for g in self.register.groups if sq in g)
+        return {
+            other: self.joint_probability({sq: occupied, other: True}) / given
+            for other in group
+            if other != sq
+        }
+
     def _labelled(self) -> int:
         return sum(bit(sq) for sq, p in enumerate(self.labels) if p is not None)
 

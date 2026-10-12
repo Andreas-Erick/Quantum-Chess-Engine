@@ -5,18 +5,23 @@ Run locally with ``uvicorn api.server:app --reload``; interactive docs are at ``
 
 from __future__ import annotations
 
+import os
 import threading
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from agent.mcts import MCTSAgent, SearchResult
 from api.schemas import (
     AIMoveRequest,
     AIMoveResponse,
+    CorrelationsResponse,
     GameState,
     HistoryEntry,
     InitRequest,
@@ -28,12 +33,15 @@ from api.schemas import (
     PieceInfo,
     SearchInfo,
 )
-from engine.bitboard import COLOR_NAMES, square_name
+from engine.bitboard import COLOR_NAMES, parse_square, square_name
 from engine.board import IllegalMoveError, MoveResult, QuantumBoard
 from engine.classical import STARTING_FEN
 from engine.measurement import PathMeasurement
 
 KIND_NAMES = ("pawn", "knight", "bishop", "rook", "queen", "king")
+
+# The built visualizer (``npm run build`` in ui/). Served at / when present.
+UI_DIR = Path(os.environ.get("QC_UI_DIR", Path(__file__).resolve().parent.parent / "ui" / "dist"))
 
 
 @dataclass
@@ -128,12 +136,20 @@ def serialize_search(search: SearchResult, limit: int = 5) -> SearchInfo:
 # --- Application ---------------------------------------------------------------------
 
 
-def create_app(store: Optional[GameStore] = None) -> FastAPI:
+def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DIR) -> FastAPI:
     store = store or GameStore()
     app = FastAPI(
         title="Quantum Chess Engine",
-        version="0.4.0",
+        version="0.5.0",
         description="Chess with superposition, entanglement and measurement, simulated with Cirq.",
+    )
+
+    # The Vite dev server (npm run dev) runs on another port during UI development.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     @app.get("/health")
@@ -156,6 +172,29 @@ def create_app(store: Optional[GameStore] = None) -> FastAPI:
         game = store.get(game_id)
         with game.lock:
             return serialize_state(game_id, game.board)
+
+    @app.get("/correlations", response_model=CorrelationsResponse)
+    def correlations(game_id: str = Query(...), square: str = Query(...)) -> CorrelationsResponse:
+        game = store.get(game_id)
+        try:
+            sq = parse_square(square)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        with game.lock:
+            board = game.board
+
+            def named(values: dict[int, float]) -> dict[str, float]:
+                return {square_name(s): p for s, p in values.items()}
+
+            probability = board.probability(sq)
+            return CorrelationsResponse(
+                square=square,
+                probability=probability,
+                if_occupied=named(board.conditional_probabilities(sq, True)) if probability else {},
+                if_empty=(
+                    named(board.conditional_probabilities(sq, False)) if probability < 1 else {}
+                ),
+            )
 
     @app.get("/legal_moves", response_model=LegalMovesResponse)
     def legal_moves(game_id: str = Query(...)) -> LegalMovesResponse:
@@ -194,6 +233,10 @@ def create_app(store: Optional[GameStore] = None) -> FastAPI:
                 **serialize_result(request.game_id, game.board, result),
                 search=serialize_search(search),
             )
+
+    if ui_dir is not None and ui_dir.is_dir():
+        # Mounted last so the API routes above take precedence.
+        app.mount("/", StaticFiles(directory=ui_dir, html=True), name="ui")
 
     return app
 
