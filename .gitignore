@@ -6,3 +6,10 @@ __pycache__/
 /build/
 /dist/
 /installer/
+
+# Analysis tools
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
