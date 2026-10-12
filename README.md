@@ -87,8 +87,15 @@ them it is built unsigned.
    trust, like your home Wi-Fi, and click **Stop hosting** when you're done (closing the app
    stops it too). Other machines can only join and play your online games, not start games or
    AI searches on your computer.
-2. The friend pastes the link into **Join** in their own app, or opens it in any browser.
-3. Moves appear on both screens instantly over a WebSocket, and each player can move only their
+2. For a friend who isn't on the same network, the host clicks **Get an internet link** under
+   the invite link. The app opens a free, temporary [Cloudflare quick
+   tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/)
+   to the same listener (no account needed), and the invite link changes to
+   `https://<random words>.trycloudflare.com/?join=…`, which works from anywhere. The first time,
+   the app installs `cloudflared` with winget (Windows) or Homebrew (macOS). **Stop hosting** or
+   closing the app closes the tunnel, and the address never works again.
+3. The friend pastes the link into **Join** in their own app, or opens it in any browser.
+4. Moves appear on both screens instantly over a WebSocket, and each player can move only their
    own side. **Game ▸ My games** returns to your own games afterwards.
 
 **In a browser**, click **Create invite link** and send it. That works whenever your friend can
@@ -96,11 +103,11 @@ reach the server: on the same network (`uvicorn api.server:app --host 0.0.0.0`),
 you deploy the Docker image to a container host (Render, Fly.io, a VPS). Put it behind HTTPS so
 the live feed runs over `wss://`.
 
-**Playing over the internet without deploying.** A host's computer is normally behind a home
-router, so a friend elsewhere can't reach it directly. Put both machines on one private network
-with [Tailscale](https://tailscale.com) (free for personal use) and host as above, or expose the
-host's port with a tunnel such as `cloudflared tunnel --url http://localhost:<port>` and invite
-with the tunnel's address.
+**Playing over the internet without the desktop app's internet link.** A host's computer is
+normally behind a home router, so a friend elsewhere can't reach it directly. Put both machines
+on one private network with [Tailscale](https://tailscale.com) (free for personal use) and host
+as above, or expose the server's port with a tunnel yourself
+(`cloudflared tunnel --url http://localhost:<port>`) and invite with the tunnel's address.
 
 **Fair dice.** When one player hosts, their app rolls the dice for every measurement, so it could
 choose the outcomes. Both players seed the dice instead: the server commits to a secret (only its
@@ -174,7 +181,7 @@ the same names: `POST /ai_move {"game_id": ..., "level": "hard"}`, and `GET /lev
 
 - **No accounts, no tracking.** The app asks for no personal information, sends no analytics or
   crash reports, and never contacts a server of ours. Its only network traffic is the game itself,
-  with a friend you host or join.
+  with a friend you host or join (relayed by Cloudflare if you use an internet link).
 - **What it stores.** Finished lessons, your chosen AI level and your seats in online games (the
   web view's storage), the dice seeds of games you joined (`joined.json`), and a log. All of it
   lives in `%APPDATA%\QuantumChess` (Windows) or `~/Library/Application Support/QuantumChess`
@@ -182,6 +189,10 @@ the same names: `POST /ai_move {"game_id": ..., "level": "hard"}`, and `GET /lev
 - **Listening on the network is opt-in.** The engine listens on `127.0.0.1` only, until you
   click **Host a game** (or start with `--lan`). **Stop hosting** closes the network listener,
   which only lets other machines join, watch and play your online games.
+- **So is the internet.** Only **Get an internet link** makes that listener reachable from the
+  internet, through a Cloudflare quick tunnel: anyone with the random address can then join or
+  watch your online games, with the same limits as on your network. Cloudflare relays that
+  traffic. The tunnel closes with **Stop hosting** or when the app closes.
 - **The window stays on known pages.** After you join, the host's page runs in your window, so
   the app keeps the window to its own pages and the games you joined, and sends it back if a page
   tries to go anywhere else. The host's page can't host, join or learn your local address.
