@@ -14,7 +14,7 @@ export interface LogEntry {
 
 const percent = (p: number) => `${Math.round(p * 100)}%`;
 
-function describe(m: MeasurementInfo): string {
+export function describe(m: MeasurementInfo): string {
   const collapsed = Object.keys(m.collapsed).length;
   const chain = collapsed > 1 ? ` · ${collapsed} squares collapsed` : "";
   if (m.kind === "path") {
