@@ -49,6 +49,15 @@ export interface GameState {
   history: HistoryEntry[];
   /** Online games only: which colours a player has claimed. Null for local games. */
   seats?: Record<Color, boolean> | null;
+  /** Online games only: how the dice were seeded (see api/fairness.py). */
+  fairness?: FairnessInfo | null;
+}
+
+export interface FairnessInfo {
+  commitment: string;
+  guest_seed: string | null;
+  /** Revealed when the game ends. */
+  secret: string | null;
 }
 
 export interface MoveResponse {
@@ -73,6 +82,8 @@ export interface AIMoveResponse extends MoveResponse {
 export interface Seat {
   color: Color;
   token: string;
+  /** The share of the dice this browser contributed when joining. */
+  seed?: string;
 }
 
 export interface SeatResponse extends Seat {

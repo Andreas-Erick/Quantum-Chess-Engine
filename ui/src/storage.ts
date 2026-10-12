@@ -38,9 +38,8 @@ export const storage = {
   seat: (gameId: string): Seat | null => {
     try {
       const seat = JSON.parse(read(SEAT_PREFIX + gameId) ?? "null");
-      return seat && (seat.color === "white" || seat.color === "black") && typeof seat.token === "string"
-        ? { color: seat.color, token: seat.token }
-        : null;
+      if (!seat || (seat.color !== "white" && seat.color !== "black") || typeof seat.token !== "string") return null;
+      return typeof seat.seed === "string" ? { color: seat.color, token: seat.token, seed: seat.seed } : { color: seat.color, token: seat.token };
     } catch {
       return null;
     }

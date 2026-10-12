@@ -1,9 +1,45 @@
-"""The desktop launcher: its embedded server and options. (The window itself needs a display.)"""
+"""The desktop launcher: its embedded server, hosting, joining and dice verification.
+(The native window needs a display, so a stand-in records what the app asks of it.)"""
 
 import httpx
 import pytest
 
-from desktop.app import free_port, parse_args, start_server
+from api.server import create_app
+from desktop.app import Desktop, JoinedGames, free_port, join_game, parse_args, start_server
+
+FEN = "k7/8/8/8/1n6/8/8/R3K3 b - - 0 1"  # see tests/test_fairness.py
+
+
+class FakeWindow:
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.dialogs: list[str] = []
+
+    def get_current_url(self) -> str:
+        return self.url
+
+    def load_url(self, url: str) -> None:
+        self.url = url
+
+    def create_confirmation_dialog(self, title: str, message: str) -> bool:
+        self.dialogs.append(message)
+        return True
+
+
+@pytest.fixture
+def host_app():
+    """A hosting player's app: its API on a local port."""
+    app = create_app(ui_dir=None)
+    port = free_port("127.0.0.1")
+    server = start_server("127.0.0.1", port, app)
+    yield app, f"http://127.0.0.1:{port}"
+    server.should_exit = True
+
+
+def make_desktop(app, url, tmp_path, name="joined.json"):
+    desktop = Desktop(app, f"{url}/", JoinedGames(tmp_path / name))
+    desktop._window = FakeWindow(f"{url}/")
+    return desktop
 
 
 def test_embedded_server_serves_api_and_ui(tmp_path):
@@ -14,7 +50,6 @@ def test_embedded_server_serves_api_and_ui(tmp_path):
         base = f"http://127.0.0.1:{port}"
         assert httpx.get(f"{base}/health").json() == {"status": "ok"}
         assert "Quantum Chess" in httpx.get(f"{base}/").text
-        assert httpx.post(f"{base}/online/create", json={}).status_code == 200
     finally:
         server.should_exit = True
 
@@ -25,3 +60,86 @@ def test_options():
     assert parse_args(["--lan", "--port", "9000"]).port == 9000
     with pytest.raises(SystemExit):
         parse_args(["--lan", "--server", "https://example.org"])
+
+
+def test_hosting_shares_the_games_on_a_second_listener(host_app, tmp_path):
+    app, url = host_app
+    desktop = make_desktop(app, url, tmp_path)
+    lan = desktop.host()
+    assert desktop.host() == lan  # started once
+    assert desktop.info() == {"local_url": f"{url}/", "lan_url": lan}
+    game_id = httpx.post(f"{url}/online/create", json={}).json()["game_id"]
+    port = lan.rsplit(":", 1)[1]
+    # The same game is reachable through the network listener.
+    assert httpx.get(f"http://127.0.0.1:{port}/state", params={"game_id": game_id}).is_success
+
+
+def test_foreign_pages_cannot_host_or_join(host_app, tmp_path):
+    app, url = host_app
+    desktop = make_desktop(app, url, tmp_path)
+    desktop._window.url = "http://192.168.1.50:8000/?game=abc"  # a host's page, after joining
+    with pytest.raises(PermissionError):
+        desktop.host()
+    with pytest.raises(PermissionError):
+        desktop.join("http://192.168.1.50:8000/?join=abc")
+    desktop.home()
+    assert desktop._window.url == f"{url}/"
+
+
+def test_join_rejects_non_links(tmp_path):
+    with pytest.raises(ValueError):
+        join_game("not a link", JoinedGames(tmp_path / "j.json"))
+    with pytest.raises(ValueError):
+        join_game("http://example.org/", JoinedGames(tmp_path / "j.json"))
+
+
+def test_join_unreachable_host_explains(tmp_path):
+    port = free_port("127.0.0.1")  # nothing listens here
+    with pytest.raises(ConnectionError):
+        join_game(f"http://127.0.0.1:{port}/?join=abc", JoinedGames(tmp_path / "j.json"))
+
+
+def test_host_join_play_and_verify(host_app, tmp_path):
+    app, url = host_app
+    # A second app joins from invite links; it keeps its seeds and opens the games.
+    guest = Desktop(None, "http://127.0.0.1:1/", JoinedGames(tmp_path / "guest.json"))
+    guest._window = FakeWindow("http://127.0.0.1:1/")
+
+    for _ in range(60):  # until the measurement lets White through (half of all games)
+        host = httpx.post(f"{url}/online/create", json={"color": "black", "fen": FEN}).json()
+        game_id = host["game_id"]
+        guest._window.url = "http://127.0.0.1:1/"
+        guest.join(f"{url}/?join={game_id}")
+        opened = guest._window.url
+        assert opened.startswith(f"{url}/?game={game_id}#seat=white.")
+        token = opened.split("#seat=white.")[1]
+        state = httpx.get(f"{url}/state", params={"game_id": game_id}).json()
+        assert state["fairness"]["guest_seed"] == guest._joined.seed(url, game_id)
+
+        guest._window.url = f"{url}/?game={game_id}"
+        guest.verify_current()
+        assert "still running" in guest._window.dialogs[-1]
+
+        for notation, seat_token in (("b4^a6c6", host["token"]), ("a1a8", token)):
+            body = {"game_id": game_id, "notation": notation, "token": seat_token}
+            state = httpx.post(f"{url}/do_move", json=body).json()["state"]
+        if state["winner"]:
+            break
+    guest.verify_current()
+    assert guest._window.dialogs[-1].startswith("Fair. All 1 measurement")
+
+
+def test_host_is_told_it_rolled_the_dice(host_app, tmp_path):
+    app, url = host_app
+    desktop = make_desktop(app, url, tmp_path)
+    desktop._window.url = f"{url}/?game=whatever"
+    desktop.verify_current()
+    assert "You hosted this game" in desktop._window.dialogs[-1]
+
+
+def test_seat_already_taken_opens_as_spectator(host_app, tmp_path):
+    app, url = host_app
+    host = httpx.post(f"{url}/online/create", json={}).json()
+    httpx.post(f"{url}/online/join", json={"game_id": host["game_id"]})
+    opened = join_game(f"{url}/?join={host['game_id']}", JoinedGames(tmp_path / "j.json"))
+    assert opened == f"{url}/?game={host['game_id']}"
