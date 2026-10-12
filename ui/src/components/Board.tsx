@@ -1,13 +1,14 @@
 import type { Correlations, GameState, Kind, PieceInfo } from "../types";
 import { FILES, squareIndex, squareName } from "../moves";
 
+// U+FE0E asks for the text glyph: without it, some systems draw ♟ as a colour emoji.
 const GLYPHS: Record<Kind, string> = {
-  king: "♚",
-  queen: "♛",
-  rook: "♜",
-  bishop: "♝",
-  knight: "♞",
-  pawn: "♟",
+  king: "♚︎",
+  queen: "♛︎",
+  rook: "♜︎",
+  bishop: "♝︎",
+  knight: "♞︎",
+  pawn: "♟︎",
 };
 
 export const GROUP_COLORS = ["#7c5cff", "#ff8a3d", "#16b8a6", "#e8508a", "#3d9bff", "#c9a400"];
@@ -46,12 +47,15 @@ export function Board(props: BoardProps) {
             const p = state.probabilities[squareIndex(sq)];
             const group = groupOf.get(sq);
             const uncertain = p > 0 && p < 1;
+            // Once a piece is picked, the squares it can go to get a dot (empty) or a ring (occupied).
+            const target = picked.length > 0 && selectable.has(sq);
             const ifOccupied = correlations?.if_occupied[sq];
             const ifEmpty = correlations?.if_empty[sq];
             const classes = [
               "square",
               (rank + file) % 2 === 0 ? "dark" : "light",
               selectable.has(sq) ? "selectable" : "",
+              uncertain ? "superposed" : "",
               picked.includes(sq) ? "picked" : "",
               lastMove.includes(sq) ? "last" : "",
               flashing.has(sq) ? "flash" : "",
@@ -69,6 +73,7 @@ export function Board(props: BoardProps) {
                 onMouseLeave={() => props.onHover(null)}
                 aria-label={`${sq}${piece ? ` ${piece.color} ${piece.kind} ${percent(p)}` : ""}`}
               >
+                {target && <span className={piece ? "hint capture" : "hint"} />}
                 {piece && (
                   <span
                     className={`piece ${piece.color}`}
@@ -78,7 +83,11 @@ export function Board(props: BoardProps) {
                   </span>
                 )}
                 {uncertain && <span className="prob">{percent(p)}</span>}
-                {uncertain && <span className="bar" style={{ width: percent(p) }} />}
+                {uncertain && (
+                  <span className="bar">
+                    <span style={{ width: percent(p) }} />
+                  </span>
+                )}
                 {ifOccupied !== undefined && ifEmpty !== undefined && (
                   <span className="conditional">
                     <span title="if the hovered square is occupied">● {percent(ifOccupied)}</span>
