@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
@@ -55,6 +55,11 @@ KIND_NAMES = ("pawn", "knight", "bishop", "rook", "queen", "king")
 UI_DIR = Path(os.environ.get("QC_UI_DIR", Path(__file__).resolve().parent.parent / "ui" / "dist"))
 # Games kept in memory at once; the least recently used is forgotten beyond that.
 MAX_GAMES = int(os.environ.get("QC_MAX_GAMES", 500))
+# Live feeds (/ws) per game: two players and some spectators, but not an unbounded number.
+MAX_FEEDS = 16
+# Set in the ASGI scope by a wrapper (the desktop app's ``GuestsOnly``) for requests from other
+# machines: those may only reach online games, never the host's own games against the AI.
+GUEST = "quantum_chess.guest"
 
 
 @dataclass
@@ -140,11 +145,16 @@ class GameStore:
                 self._games.move_to_end(game_id)
             return game
 
-    def get(self, game_id: str) -> Game:
+    def get(self, game_id: str, guest: bool = False) -> Game:
         game = self.find(game_id)
-        if game is None:
+        # To a guest, the host's own games don't exist.
+        if game is None or (guest and game.seats is None):
             raise HTTPException(status_code=404, detail=f"unknown game {game_id!r}")
         return game
+
+
+def is_guest(connection: Request | WebSocket) -> bool:
+    return bool(connection.scope.get(GUEST))
 
 
 # --- Serialisation -------------------------------------------------------------------
@@ -252,14 +262,16 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
         return store.get(game_id).state(game_id)
 
     @app.get("/state", response_model=GameState)
-    def state(game_id: str = Query(...)) -> GameState:
-        game = store.get(game_id)
+    def state(http: Request, game_id: str = Query(...)) -> GameState:
+        game = store.get(game_id, is_guest(http))
         with game.lock:
             return game.state(game_id)
 
     @app.get("/correlations", response_model=CorrelationsResponse)
-    def correlations(game_id: str = Query(...), square: str = Query(...)) -> CorrelationsResponse:
-        game = store.get(game_id)
+    def correlations(
+        http: Request, game_id: str = Query(...), square: str = Query(...)
+    ) -> CorrelationsResponse:
+        game = store.get(game_id, is_guest(http))
         try:
             sq = parse_square(square)
         except ValueError as exc:
@@ -293,15 +305,15 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
         ]
 
     @app.get("/legal_moves", response_model=LegalMovesResponse)
-    def legal_moves(game_id: str = Query(...)) -> LegalMovesResponse:
-        game = store.get(game_id)
+    def legal_moves(http: Request, game_id: str = Query(...)) -> LegalMovesResponse:
+        game = store.get(game_id, is_guest(http))
         with game.lock:
             moves = [m.notation() for m in game.board.legal_moves()]
         return LegalMovesResponse(game_id=game_id, moves=moves)
 
     @app.post("/do_move", response_model=MoveResponse)
-    def do_move(request: MoveRequest) -> MoveResponse:
-        game = store.get(request.game_id)
+    def do_move(request: MoveRequest, http: Request) -> MoveResponse:
+        game = store.get(request.game_id, is_guest(http))
         with game.lock:
             if game.board.is_over:
                 raise HTTPException(status_code=409, detail="the game is over")
@@ -360,8 +372,8 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
         return SeatResponse(game_id=game_id, color=color, token=token, state=state)
 
     @app.post("/online/join", response_model=SeatResponse)
-    def online_join(request: JoinRequest) -> SeatResponse:
-        game = store.get(request.game_id)
+    def online_join(request: JoinRequest, http: Request) -> SeatResponse:
+        game = store.get(request.game_id, is_guest(http))
         with game.lock:
             if game.seats is None:
                 raise HTTPException(status_code=400, detail="this is not an online game")
@@ -382,16 +394,18 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
         player joins, and ``{"type": "move", ...MoveResponse}`` after every move. Anything the
         client sends is ignored; it only keeps the connection alive."""
         game = store.find(game_id)
-        if game is None:
+        if game is None or (is_guest(websocket) and game.seats is None):
             await websocket.close(code=4404)
             return
         await websocket.accept()
         queue: asyncio.Queue = asyncio.Queue()
         feed = (asyncio.get_running_loop(), queue)
 
-        def subscribe() -> dict:
+        def subscribe() -> Optional[dict]:
             # Snapshot and subscribe under the game lock so no move can fall in between.
             with game.lock:
+                if len(game.subscribers) >= MAX_FEEDS:
+                    return None
                 game.subscribers.append(feed)
                 return {"type": "state", "state": game.state(game_id).model_dump(mode="json")}
 
@@ -400,7 +414,11 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
                 game.subscribers.remove(feed)
 
         # The lock may be held by an AI search for seconds: never take it on the event loop.
-        queue.put_nowait(await run_in_threadpool(subscribe))
+        snapshot = await run_in_threadpool(subscribe)
+        if snapshot is None:
+            await websocket.close(code=4429, reason="too many live feeds for this game")
+            return
+        queue.put_nowait(snapshot)
 
         async def pump() -> None:
             while True:
