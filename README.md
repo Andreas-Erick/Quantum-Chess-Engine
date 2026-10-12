@@ -13,7 +13,7 @@ the AI agent are separate modules that communicate only through strict JSON sche
 | 2. Quantum layer | Cirq integration, split / merge moves, measurement | ✅ done |
 | 3. Entanglement | Slide moves through superposed pieces, collapse chains | ✅ done |
 | 4. API & AI | FastAPI server, MCTS agent, Docker | ✅ done |
-| 5. Visualizer | Browser UI showing probabilities and entanglement | ⬜ next |
+| 5. Visualizer | React + TypeScript board showing probabilities and entanglement | ✅ done |
 
 ## Layout
 
@@ -39,6 +39,9 @@ tests/
   test_entanglement.py   # slides, path measurement, A->B->C collapse chains
   test_agent.py          # heuristics, MCTS tactics, copy/replay
   test_api.py            # endpoints, error codes, JSON replay, remote self-play
+ui/                     # React + TypeScript visualizer (Vite)
+  src/components/Board.tsx    # probabilities, entanglement rings, conditional overlays
+  src/moves.ts                # clicks -> move notation, driven by the legal-move list
 Dockerfile, docker-compose.yml
 ```
 
@@ -117,6 +120,27 @@ Groups are combined (tensor product) only when a gate or a path measurement span
 happens when pieces actually interact. In random self-play, 25+ squares are uncertain at once while
 the largest group stays near 2^19 amplitudes.
 
+## Visualizer
+
+The UI is a React + TypeScript app (`ui/`). FastAPI serves the built UI at `/`, so the
+container hosts the board and the API on one port.
+
+* Each piece is drawn with opacity proportional to its probability, plus a percentage label and
+  a probability bar.
+* Squares in the same **entanglement group** share a coloured ring. **Hovering** an uncertain
+  square shows, on every square entangled with it, its probability if the hovered square is
+  occupied (●) and if it is empty (○). For example, hovering a knight that a rook slid past
+  shows the rook's two possible squares at 100% and 0%.
+* Squares that collapse in a measurement flash, and the move log explains each measurement:
+  `d2 occupied? (50%) → no · 6 squares collapsed`.
+* Move, Split and Merge modes highlight only the squares that complete a legal move. The AI can
+  play either side at an adjustable strength. A `?game=<id>` link opens a specific game.
+
+```bash
+uvicorn api.server:app --port 8000        # terminal 1: engine + API
+cd ui && npm install && npm run dev       # terminal 2: UI with hot reload on :5173
+```
+
 ## REST API
 
 ```bash
@@ -129,6 +153,7 @@ uvicorn api.server:app --reload     # interactive docs at http://localhost:8000/
 | `POST` | `/do_move` | `{game_id, notation}` or `{game_id, move_type, source, target1, target2?, source2?, promotion?}` |
 | `GET` | `/state?game_id=` | Pieces, 64 probabilities, entanglement groups, full history |
 | `GET` | `/legal_moves?game_id=` | All legal moves in notation |
+| `GET` | `/correlations?game_id=&square=` | Entangled squares' probabilities given that square is occupied / empty |
 | `POST` | `/ai_move` | Let the MCTS agent move (`{game_id, iterations?, rollout_depth?, time_limit?, seed?}`) |
 | `GET` | `/health` | Liveness probe |
 
@@ -167,7 +192,7 @@ python -m agent.client --url http://localhost:8000 --game-id ID --color black
 ## Docker
 
 ```bash
-docker compose up --build                     # API on http://localhost:8000
+docker compose up --build                     # UI + API on http://localhost:8000
 docker compose --profile demo up --build      # API plus an MCTS self-play client
 ```
 
@@ -179,4 +204,5 @@ python -m venv .venv
 pip install -r requirements-dev.txt
 pytest -q
 black --check . && flake8
+cd ui && npm ci && npm test && npm run build
 ```

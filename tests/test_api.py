@@ -149,3 +149,29 @@ def test_remote_agent_self_play_through_api(client):
     assert len(final["history"]) == 12 or final["winner"] is not None
     # Every move the client made went through the API and replays consistently.
     assert board_from_state(final).probabilities() == pytest.approx(final["probabilities"])
+
+
+def test_correlations_show_entanglement(client):
+    # Knight on c3 or d2; rook slides a3->e3 through c3, so rook-on-e3 <=> knight-on-d2.
+    game_id = new_game(client, fen="7k/8/8/8/8/R7/8/1N5K w - - 0 1")["game_id"]
+    for move in ["b1^c3d2", "h8g8", "a3e3"]:
+        client.post("/do_move", json={"game_id": game_id, "notation": move})
+    body = client.get("/correlations", params={"game_id": game_id, "square": "c3"}).json()
+    assert body["probability"] == pytest.approx(0.5)
+    assert body["if_occupied"] == pytest.approx({"d2": 0.0, "a3": 1.0, "e3": 0.0})
+    assert body["if_empty"] == pytest.approx({"d2": 1.0, "a3": 0.0, "e3": 1.0})
+
+
+def test_correlations_for_classical_square_are_empty(client):
+    game_id = new_game(client)["game_id"]
+    body = client.get("/correlations", params={"game_id": game_id, "square": "e2"}).json()
+    assert body == {"square": "e2", "probability": 1.0, "if_occupied": {}, "if_empty": {}}
+    bad = client.get("/correlations", params={"game_id": game_id, "square": "z9"})
+    assert bad.status_code == 400
+
+
+def test_serves_built_ui(tmp_path):
+    (tmp_path / "index.html").write_text("<html>quantum chess ui</html>")
+    ui_client = TestClient(create_app(ui_dir=tmp_path))
+    assert "quantum chess ui" in ui_client.get("/").text
+    assert ui_client.get("/health").json() == {"status": "ok"}  # API still wins

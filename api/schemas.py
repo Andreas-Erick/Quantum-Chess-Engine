@@ -118,6 +118,19 @@ class AIMoveResponse(MoveResponse):
     search: SearchInfo
 
 
+class CorrelationsResponse(BaseModel):
+    """How the rest of a square's entanglement group depends on that square."""
+
+    square: SquareName
+    probability: float
+    if_occupied: dict[SquareName, float] = Field(
+        description="Occupancy of each entangled square, given this square is occupied"
+    )
+    if_empty: dict[SquareName, float] = Field(
+        description="Occupancy of each entangled square, given this square is empty"
+    )
+
+
 class LegalMovesResponse(BaseModel):
     game_id: str
     moves: list[str]
