@@ -68,6 +68,7 @@ python -m desktop.make_icon                # redraw the icons (needs pillow and 
 
 The window is the system web view (Edge WebView2 on Windows, WebKit on macOS), showing the same UI
 the server hosts. Pushing a `v*` tag builds both installers in CI and attaches them to a release.
+Pull requests that change the app build them too, as a check.
 The release is signed (Windows) and signed and notarized (macOS) when the repository has the
 signing secrets listed at the top of [`desktop.yml`](.github/workflows/desktop.yml); without
 them it is built unsigned.
