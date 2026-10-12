@@ -75,7 +75,7 @@ def test_hosting_shares_the_games_on_a_second_listener(host_app, tmp_path):
     desktop = make_desktop(app, url, tmp_path)
     lan = desktop.host()
     assert desktop.host() == lan  # started once
-    assert desktop.info() == {"own_page": True, "lan_url": lan}
+    assert desktop.info() == {"own_page": True, "lan_url": lan, "public_url": None}
     game_id = httpx.post(f"{url}/online/create", json={}).json()["game_id"]
     port = lan.rsplit(":", 1)[1]
     # The same game is reachable through the network listener.
@@ -102,7 +102,7 @@ def test_stop_hosting_closes_the_network_listener(host_app, tmp_path):
     lan = "http://127.0.0.1:" + desktop.host().rsplit(":", 1)[1]
     assert httpx.get(f"{lan}/health").is_success
     desktop.stop_hosting()
-    assert desktop.info() == {"own_page": True, "lan_url": None}
+    assert desktop.info() == {"own_page": True, "lan_url": None, "public_url": None}
     with pytest.raises(httpx.ConnectError):
         httpx.get(f"{lan}/health")
     assert httpx.get(f"{url}/health").is_success  # the app itself keeps running
@@ -158,9 +158,11 @@ def test_foreign_pages_cannot_host_or_join(host_app, tmp_path):
     desktop = make_desktop(app, url, tmp_path)
     desktop.host()
     desktop._window.url = "http://192.168.1.50:8000/?game=abc"  # a host's page, after joining
-    assert desktop.info() == {"own_page": False, "lan_url": None}  # learns nothing about us
+    assert desktop.info() == {"own_page": False, "lan_url": None, "public_url": None}
     with pytest.raises(PermissionError):
         desktop.host()
+    with pytest.raises(PermissionError):
+        desktop.share_online()
     with pytest.raises(PermissionError):
         desktop.stop_hosting()
     with pytest.raises(PermissionError):

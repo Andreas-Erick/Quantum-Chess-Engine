@@ -14,7 +14,8 @@ generated and kept here, where the host can't see or replace it, so the joiner c
 finished game from the Game menu.
 
 Hosting opens the app to the network, so it is opt-in, can be stopped, and lets other machines
-only join and play the host's online games (see ``GuestsOnly``).
+only join and play the host's online games (see ``GuestsOnly``). For a friend elsewhere, the
+host can also give that listener a temporary internet address (see desktop/tunnel.py).
 """
 
 from __future__ import annotations
@@ -205,6 +206,7 @@ class Desktop:
         self._home_url = local_url or start_url
         self._lan_server: Any = None
         self._lan_url: Optional[str] = None
+        self._tunnel: Any = None
         self._joined = joined
         self._window: Any = None
         self._lock = threading.Lock()
@@ -225,8 +227,23 @@ class Desktop:
                 self._allowed.add(origin_of(self._lan_url))
             return self._lan_url
 
+    def _share_online(self, tunnel_command: Optional[list[str]] = None) -> str:
+        from desktop.tunnel import Tunnel
+
+        self._start_hosting()
+        with self._lock:
+            if self._tunnel is None:
+                port = int(self._lan_url.rsplit(":", 1)[1])
+                tunnel = Tunnel(port, tunnel_command)
+                tunnel.start()  # raises TunnelError with a message for the player
+                self._tunnel = tunnel
+            return self._tunnel.url
+
     def _stop_hosting(self) -> None:
         with self._lock:
+            if self._tunnel is not None:
+                self._tunnel.stop()
+                self._tunnel = None
             if self._lan_server is not None:
                 stop_server(self._lan_server)
                 self._allowed.discard(origin_of(self._lan_url))
@@ -258,7 +275,11 @@ class Desktop:
         """Whether this is the app's own page, and where it hosts. A host's page learns no
         more than that it isn't the app's own."""
         own = self._on_own_page()
-        return {"own_page": own, "lan_url": self._lan_url if own else None}
+        return {
+            "own_page": own,
+            "lan_url": self._lan_url if own else None,
+            "public_url": self._tunnel.url if own and self._tunnel else None,
+        }
 
     def host(self) -> str:
         """Start accepting players from the local network; returns the address to invite to."""
@@ -266,8 +287,16 @@ class Desktop:
             raise PermissionError("only the app's own page can start hosting")
         return self._start_hosting()
 
+    def share_online(self) -> str:
+        """Also accept players from the internet, through a temporary public address (starting
+        to host first if needed); returns that address. Installs cloudflared the first time."""
+        if not self._on_own_page():
+            raise PermissionError("only the app's own page can share games online")
+        return self._share_online()
+
     def stop_hosting(self) -> None:
-        """Stop accepting players from the network. Games in progress there are cut off."""
+        """Stop accepting players from the network and the internet. Games in progress there
+        are cut off."""
         if not self._on_own_page():
             raise PermissionError("only the app's own page can stop hosting")
         self._stop_hosting()
@@ -295,7 +324,10 @@ class Desktop:
         game_id = game_of(url)
         if not game_id:
             message = "Open a finished online game first."
-        elif self._on_own_page() or (self._lan_url and url.startswith(self._lan_url)):
+        elif self._on_own_page() or any(
+            base and url.startswith(base)
+            for base in (self._lan_url, self._tunnel.url if self._tunnel else None)
+        ):
             message = "You hosted this game: the dice were rolled by your own app."
         else:
             try:
@@ -386,6 +418,7 @@ def main(argv: Optional[list[str]] = None) -> None:
             bundle_dir() / "desktop" / ("icon.ico" if sys.platform == "win32" else "icon.png")
         ),
     )
+    desktop._stop_hosting()  # the window closed: don't leave a tunnel open
 
 
 if __name__ == "__main__":
