@@ -13,11 +13,11 @@
 [Setup]
 ; The AppId identifies the app across versions, so upgrades replace it. Never change it.
 AppId={{A13B2EEE-2C64-4474-82F0-F3B08D164B49}
-AppName=Quantum Chess
+AppName=Quantum Chess Engine
 AppVersion={#AppVersion}
 AppPublisher=Andreas Erick
 AppPublisherURL=https://github.com/Andreas-Erick/Quantum-Chess
-DefaultDirName={autopf}\Quantum Chess
+DefaultDirName={autopf}\Quantum Chess Engine
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
@@ -43,6 +43,9 @@ Source: "..\dist\QuantumChess\*"; DestDir: "{app}"; Flags: ignoreversion recurse
 [InstallDelete]
 ; Clear the previous version's bundled libraries, so an upgrade never mixes old and new files.
 Type: filesandordirs; Name: "{app}\_internal"
+; Shortcuts from before the app was renamed (0.8.1 and earlier), so an upgrade leaves no duplicates.
+Type: files; Name: "{autoprograms}\Quantum Chess.lnk"
+Type: files; Name: "{autodesktop}\Quantum Chess.lnk"
 
 [UninstallDelete]
 ; What the app saved: browser storage (finished lessons), the seeds of joined games, the log.
@@ -50,8 +53,8 @@ Type: filesandordirs; Name: "{app}\_internal"
 Type: filesandordirs; Name: "{userappdata}\QuantumChess"
 
 [Icons]
-Name: "{autoprograms}\Quantum Chess"; Filename: "{app}\QuantumChess.exe"
-Name: "{autodesktop}\Quantum Chess"; Filename: "{app}\QuantumChess.exe"; Tasks: desktopicon
+Name: "{autoprograms}\Quantum Chess Engine"; Filename: "{app}\QuantumChess.exe"
+Name: "{autodesktop}\Quantum Chess Engine"; Filename: "{app}\QuantumChess.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\QuantumChess.exe"; Description: "{cm:LaunchProgram,Quantum Chess}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\QuantumChess.exe"; Description: "{cm:LaunchProgram,Quantum Chess Engine}"; Flags: nowait postinstall skipifsilent

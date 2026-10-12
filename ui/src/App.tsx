@@ -408,7 +408,7 @@ export default function App() {
         <div className="brand">
           <img src="/favicon.svg" alt="" width="40" height="40" />
           <div>
-            <h1>Quantum Chess</h1>
+            <h1>Quantum Chess Engine</h1>
             <p className="tagline">Superposition, entanglement, measurement</p>
           </div>
         </div>

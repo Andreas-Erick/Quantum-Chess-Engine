@@ -1,4 +1,4 @@
-"""Quantum Chess as a desktop app: the engine runs in-process, the UI in a native window.
+"""Quantum Chess Engine as a desktop app: the engine runs in-process, the UI in a native window.
 
     python -m desktop                       # play locally; host or join friends from the app
     python -m desktop --lan                 # start hosting on your network right away
@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlsplit
 
-APP_NAME = "Quantum Chess"
+APP_NAME = "Quantum Chess Engine"
 
 # Endpoints the network listener refuses: each starts a game or an AI search on the host's
 # computer, which only the host should be able to do. Guests don't need the API docs either.
@@ -297,8 +297,8 @@ class Desktop:
             self._window.load_url(self._home_url)
         self._window.create_confirmation_dialog(
             "Page blocked",
-            f"A page tried to open {origin_of(url)} in this window. Quantum Chess only shows "
-            "its own games and the games you join, so it went back to your games.",
+            f"A page tried to open {origin_of(url)} in this window. Quantum Chess Engine only "
+            "shows its own games and the games you join, so it went back to your games.",
         )
 
     def _before_load(self) -> None:
