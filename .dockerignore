@@ -5,6 +5,5 @@
 .pytest_cache
 **/__pycache__
 tests
-main.py
 ui/node_modules
 ui/dist
