@@ -81,7 +81,7 @@ export function OnlineCard({
           <>
             <p className="muted small">
               {hosting
-                ? "Host a game on your network and send your friend the link. They can join from their own Quantum Chess app or a browser. Only host on networks you trust, like your home Wi-Fi."
+                ? "Host a game on your network and send your friend the link. They can join from their own Quantum Chess Engine app or a browser. Only host on networks you trust, like your home Wi-Fi."
                 : "Start a game and send your friend the link. Each of you plays from your own device."}
             </p>
             <label className="row">
@@ -165,7 +165,7 @@ export function OnlineCard({
           ) : hosting ? (
             <>
               <p className="muted small">
-                This link works for a friend on the same network. If they can't connect, allow Quantum Chess through
+                This link works for a friend on the same network. If they can't connect, allow Quantum Chess Engine through
                 your firewall, on private networks only.
               </p>
               <div className="buttons">

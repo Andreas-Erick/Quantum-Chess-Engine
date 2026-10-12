@@ -1,4 +1,4 @@
-# Quantum Chess
+# Quantum Chess Engine
 
 [![CI](https://github.com/Andreas-Erick/Quantum-Chess/actions/workflows/ci.yml/badge.svg)](https://github.com/Andreas-Erick/Quantum-Chess/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
@@ -82,7 +82,7 @@ them it is built unsigned.
 
 1. The host clicks **Host a game** in the **Play a friend** card. Their app starts accepting
    players from the local network, and the invite link points at it
-   (`http://192.168.1.20:52814/?join=…`). Windows may ask to allow Quantum Chess through the
+   (`http://192.168.1.20:52814/?join=…`). Windows may ask to allow Quantum Chess Engine through the
    firewall the first time: allow it on **private networks only**. Host only on networks you
    trust, like your home Wi-Fi, and click **Stop hosting** when you're done (closing the app
    stops it too). Other machines can only join and play your online games, not start games or
@@ -178,6 +178,10 @@ threats; Medium (the default) looks one move ahead; Hard thinks longer and deepe
 the same names: `POST /ai_move {"game_id": ..., "level": "hard"}`, and `GET /levels` lists them.
 
 ## Privacy and security
+
+Quantum Chess Engine is a hobby project: reviewed for security, but not professionally audited. Host
+games only with people you trust, and report problems privately as described in
+[SECURITY.md](SECURITY.md).
 
 - **No accounts, no tracking.** The app asks for no personal information, sends no analytics or
   crash reports, and never contacts a server of ours. Its only network traffic is the game itself,
@@ -429,15 +433,18 @@ them after changing a requirements file, with the `uv pip compile` command in ea
   that matters; the desktop app's network listener refuses them outright.
 - There are no accounts: whoever holds a seat token plays that side, and anyone with the game
   link can watch.
-- Hosting from the desktop app reaches only the local network. Over the internet it needs a VPN
-  like Tailscale or a tunnel, or a deployed server; there is no built-in NAT traversal.
+- Playing over the internet from the desktop app goes through a Cloudflare quick tunnel, which
+  depends on Cloudflare's free service and relays the game's traffic. There is no direct
+  peer-to-peer connection.
 - Until signing certificates are added to the repository, the desktop builds are unsigned, so
   Windows SmartScreen and macOS Gatekeeper warn on first launch.
 
 ## Acknowledgements
 
 The move set and notation follow Chris Cantwell's *Quantum Chess*. The quantum simulation uses
-[Cirq](https://quantumai.google/cirq).
+[Cirq](https://quantumai.google/cirq). The app icon's knight is the ♞ glyph of
+[DejaVu Sans](https://dejavu-fonts.github.io/) ([license](https://dejavu-fonts.github.io/License.html)).
+Internet play uses [Cloudflare quick tunnels](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/).
 
 ## License
 
