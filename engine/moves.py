@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import Optional, Sequence
 
 import cirq
 
@@ -123,3 +123,14 @@ def merge_ops(source: cirq.Qid, source2: cirq.Qid, target: cirq.Qid) -> list[cir
     phases interfere only partially and leave some amplitude on the sources.
     """
     return [(cirq.ISWAP**-1)(source2, target), SQRT_ISWAP_INV(source, target)]
+
+
+def slide_ops(source: cirq.Qid, target: cirq.Qid, path: Sequence[cirq.Qid]) -> list[cirq.Operation]:
+    """Move a piece through possibly occupied squares: an iSWAP controlled on an empty path.
+
+    In every branch where some path square is occupied, the piece stays put. This entangles
+    the moving piece with the blockers.
+    """
+    if not path:
+        return jump_ops(source, target)
+    return [cirq.ISWAP(source, target).controlled_by(*path, control_values=[0] * len(path))]
