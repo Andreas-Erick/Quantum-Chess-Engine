@@ -47,8 +47,11 @@ uvicorn api.server:app
 <details>
 <summary>Desktop app</summary>
 
-Download the Windows or macOS build from the
-[releases page](https://github.com/Andreas-Erick/Quantum-Chess/releases), or run it from source:
+Download the installer from the
+[releases page](https://github.com/Andreas-Erick/Quantum-Chess/releases):
+`QuantumChess-Setup-<version>.exe` for Windows (no admin rights needed; adds a Start menu entry
+and an uninstaller) or `QuantumChess-<version>.dmg` for macOS (drag the app to Applications).
+Or run it from source:
 
 ```bash
 pip install -r requirements-desktop.txt
@@ -57,10 +60,11 @@ python -m desktop                          # the game in its own window, engine 
 python -m desktop --lan                    # let a friend on your network join online games
 python -m desktop --server https://...     # open a hosted server to play friends anywhere
 pyinstaller desktop/quantum_chess.spec     # build dist/QuantumChess yourself
+iscc /DAppVersion=1.2.3 desktop/installer.iss   # then the Windows installer (Inno Setup 6)
 ```
 
 The window is the system web view (Edge WebView2 on Windows, WebKit on macOS), showing the same UI
-the server hosts. Pushing a `v*` tag builds both platforms in CI and attaches them to a release.
+the server hosts. Pushing a `v*` tag builds both installers in CI and attaches them to a release.
 
 </details>
 
