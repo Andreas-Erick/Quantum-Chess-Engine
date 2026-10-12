@@ -10,8 +10,9 @@
 **Chess where a knight can be on two squares at once.** Pieces can split into **superposition**.
 A piece that slides past an uncertain square becomes **entangled** with it. A capture forces a
 **measurement** that collapses the board, sometimes in a chain reaction across several pieces.
-The quantum state is simulated with Google's [Cirq](https://quantumai.google/cirq). You can play
-against a Monte Carlo Tree Search AI in the browser.
+The quantum state is simulated with Google's [Cirq](https://quantumai.google/cirq). Play against a
+Monte Carlo Tree Search AI, learn the rules in an interactive tutorial, or play a friend online
+with dice neither of you can rig, in the browser or the desktop app for Windows and macOS.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
@@ -121,6 +122,10 @@ server rules out. Details in [`api/fairness.py`](api/fairness.py).
   outcomes in proportion to their true probabilities. Progressive widening keeps the search
   focused despite hundreds of possible splits per position. Improvements are measured, not
   guessed: an arena plays agent versions against each other.
+- **Two players, fair dice.** Online games push every move over a WebSocket. The desktop app can
+  host a game on the local network or join one. Measurement outcomes come from dice both players
+  seed (commit–reveal), so a hosting player can't choose them, and the joiner can replay the
+  finished game to check every outcome.
 - **Tested hard where things are random.** 223 Python tests and 17 UI tests: perft-verified move
   generation, forced and statistical measurement outcomes, A→B→C entanglement chains, and
   random-play invariant checks. CI runs everything plus a Docker smoke test.
@@ -160,12 +165,15 @@ the same names: `POST /ai_move {"game_id": ..., "level": "hard"}`, and `GET /lev
 
 ```mermaid
 flowchart LR
-    UI["React + TypeScript UI"] -- JSON --> API
+    UI["React + TypeScript UI<br/>browser or desktop window"] -- "JSON + WebSocket" --> API
+    Friend["A friend's UI"] -- "JSON + WebSocket" --> API
     Remote["Remote MCTS client"] -- JSON --> API
-    subgraph Server
+    subgraph Server["Server (Docker, or in-process in the desktop app)"]
         API["FastAPI<br/>api/"] --> Board
         API --> MCTS["MCTS agent<br/>agent/"]
+        API --> Dice["Fair dice<br/>api/fairness.py"]
         MCTS --> Board
+        Dice --> Resolver
         Board["QuantumBoard<br/>rules"] --> Classical["Bitboard move generation"]
         Board --> Register["Sparse register<br/>Cirq state vectors"]
         Board --> Resolver["Measurement<br/>Born rule, collapse chains"]
@@ -251,6 +259,7 @@ because a friend's page loaded in the same window gets the bridge too.
 | `POST` | `/do_move` | `{game_id, notation}` or `{game_id, move_type, source, target1, target2?, source2?, promotion?}` |
 | `GET` | `/state?game_id=` | Pieces, 64 probabilities, entanglement groups, full history |
 | `GET` | `/legal_moves?game_id=` | All legal moves in notation |
+| `GET` | `/levels` | AI strength levels (`easy`, `medium`, `hard`) and which is the default |
 | `GET` | `/correlations?game_id=&square=` | Entangled squares' probabilities given that square is occupied / empty |
 | `POST` | `/ai_move` | MCTS move (`{game_id, iterations?, rollout_depth?, time_limit?, seed?}`) |
 | `POST` | `/online/create` | Online game (`{color: white\|black\|random}`) → `{game_id, color, token, state}` |
@@ -321,11 +330,15 @@ agent/
 desktop/
   app.py            native window, in-process server, hosting and joining, Game menu
   quantum_chess.spec  PyInstaller build for Windows and macOS
+  installer.iss     Inno Setup script for the Windows installer
 ui/src/
+  App.tsx           game flow: local, AI, tutorial and online games
   components/       Board, MoveLog, TutorialCard, OnlineCard
   tutorial/         lessons.json and its types
+  api.ts, types.ts  the JSON contract, mirrored from api/schemas.py
   live.ts           live-feed WebSocket with reconnects
   desktop.ts        the desktop app bridge (host, join, back to my games)
+  storage.ts        per-browser state: resumed game, seats and seeds, finished lessons
   moves.ts          clicks -> move notation, driven by the legal-move list
 tests/              classical, superposition, measurement, entanglement, rules, agent, arena, api,
                     online, fairness, tutorial, desktop
@@ -341,6 +354,7 @@ pytest -q                                   # 223 tests, ~12 s
 black --check . && flake8
 cd ui && npm ci && npm test && npm run build
 cd ui && npm run dev                        # UI with hot reload on :5173 (proxies to :8000)
+python -m desktop                           # the desktop app, from source
 python -m agent.arena --games 40 --a iterations=400 --b iterations=100   # agent strength match
 ```
 
