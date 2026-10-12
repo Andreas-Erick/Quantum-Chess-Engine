@@ -124,7 +124,7 @@ jobs:
           ln -s /Applications dmg/Applications
           # hdiutil sometimes fails with "Resource busy" on CI machines; retry a few times.
           for attempt in 1 2 3 4 5; do
-            hdiutil create -volname "Quantum Chess" -srcfolder dmg -ov -format UDZO \
+            hdiutil create -volname "Quantum Chess Engine" -srcfolder dmg -ov -format UDZO \
               "installer/QuantumChess-$VERSION.dmg" && break
             sleep 5
           done
