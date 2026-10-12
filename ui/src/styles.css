@@ -381,6 +381,15 @@ h2 {
   font-size: 11px;
 }
 
+.levels {
+  margin-top: 10px;
+}
+
+.level-hint {
+  margin: 6px 0 10px;
+  font-size: 12px;
+}
+
 .modes button.active {
   border-color: var(--accent);
   background: var(--accent-soft);

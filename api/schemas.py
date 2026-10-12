@@ -51,8 +51,14 @@ class MoveRequest(BaseModel):
         return f"{self.source}{self.target1}{self.promotion or ''}"
 
 
+LevelName = Literal["easy", "medium", "hard"]
+
+
 class AIMoveRequest(BaseModel):
+    """Pick a ``level``, or tune the search directly (the fields below apply without a level)."""
+
     game_id: str
+    level: Optional[LevelName] = Field(None, description="Named strength; overrides the rest")
     iterations: int = Field(400, ge=1, le=20000)
     rollout_depth: int = Field(6, ge=0, le=40)
     time_limit: Optional[float] = Field(None, gt=0, le=60, description="Seconds")
@@ -138,6 +144,13 @@ class CorrelationsResponse(BaseModel):
     if_empty: dict[SquareName, float] = Field(
         description="Occupancy of each entangled square, given this square is empty"
     )
+
+
+class LevelInfo(BaseModel):
+    name: LevelName
+    label: str
+    description: str
+    default: bool
 
 
 class LegalMovesResponse(BaseModel):

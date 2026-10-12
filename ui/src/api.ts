@@ -1,4 +1,4 @@
-import type { AIMoveResponse, Correlations, GameState, MoveResponse } from "./types";
+import type { AIMoveResponse, Correlations, GameState, LevelInfo, LevelName, MoveResponse } from "./types";
 
 export class ApiError extends Error {}
 
@@ -31,8 +31,8 @@ export const api = {
     request<{ moves: string[] }>(`/legal_moves?game_id=${encodeURIComponent(gameId)}`).then((r) => r.moves),
   move: (gameId: string, notation: string) =>
     post<MoveResponse>("/do_move", { game_id: gameId, notation }),
-  aiMove: (gameId: string, iterations: number) =>
-    post<AIMoveResponse>("/ai_move", { game_id: gameId, iterations }),
+  aiMove: (gameId: string, level: LevelName) => post<AIMoveResponse>("/ai_move", { game_id: gameId, level }),
+  levels: () => request<LevelInfo[]>("/levels"),
   correlations: (gameId: string, square: string) =>
     request<Correlations>(
       `/correlations?game_id=${encodeURIComponent(gameId)}&square=${encodeURIComponent(square)}`,
