@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from agent.levels import DEFAULT_LEVEL, LEVELS
+from api import __version__
 from agent.mcts import MCTSAgent, SearchResult
 from api.fairness import SeededDice, commitment, new_secret
 from api.schemas import (
@@ -233,7 +234,7 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
     store = store or GameStore()
     app = FastAPI(
         title="Quantum Chess Engine",
-        version="0.6.0",
+        version=__version__,
         description="Chess with superposition, entanglement and measurement, simulated with Cirq.",
     )
 
