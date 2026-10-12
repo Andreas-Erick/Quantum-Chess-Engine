@@ -2,11 +2,13 @@ name: Desktop app
 
 # Builds the desktop installers: a setup .exe for Windows and a .dmg for macOS. Runs on version
 # tags (v1.2.3), which also attach the installers to a GitHub release, and on demand from the
-# Actions tab (the installers are then workflow artifacts, versioned 0.0.0).
+# Actions tab (the installers are then workflow artifacts, versioned 0.0.0). Pull requests that
+# change what goes into the app build it too, as a check: unsigned and never released.
 #
 # Dependencies come from requirements-desktop.lock, with hashes. Actions are pinned to commits.
 #
-# Signing is optional: it runs when the repository has these secrets, and is skipped otherwise.
+# Signing is optional: it runs when the repository has these secrets (except on pull requests),
+# and is skipped otherwise.
 #   Windows: WINDOWS_CERT_PFX (the code-signing certificate as a base64 .pfx),
 #            WINDOWS_CERT_PASSWORD
 #   macOS:   MACOS_CERT_P12 ("Developer ID Application" certificate as a base64 .p12),
@@ -16,9 +18,24 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+  pull_request:
+    paths:
+      - "agent/**"
+      - "api/**"
+      - "desktop/**"
+      - "engine/**"
+      - "ui/**"
+      - "requirements*.txt"
+      - "requirements*.lock"
+      - ".github/workflows/desktop.yml"
 
 permissions:
   contents: read
+
+# A new push to a pull request replaces its build in progress; tag and manual builds always finish.
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -51,6 +68,8 @@ jobs:
           WINDOWS_CERT: ${{ secrets.WINDOWS_CERT_PFX }}
           MACOS_CERT: ${{ secrets.MACOS_CERT_P12 }}
         run: |
+          # Pull request builds are only a check: keep the certificates out of them.
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then exit 0; fi
           echo "windows=${WINDOWS_CERT:+yes}" >> "$GITHUB_OUTPUT"
           echo "macos=${MACOS_CERT:+yes}" >> "$GITHUB_OUTPUT"
       - run: npm ci && npm run build
