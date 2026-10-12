@@ -70,8 +70,10 @@ class MCTSAgent:
         rollout_depth: int = 6,
         exploration: float = 1.4,
         capture_bias: float = 0.5,
+        quantum_rate: float = 0.15,
         max_group_qubits: int = 12,
         widening: float = 2.0,
+        root_lookahead: bool = True,
         time_limit: Optional[float] = None,
         seed: Optional[int] = None,
     ) -> None:
@@ -81,10 +83,16 @@ class MCTSAgent:
             rollout_depth: plies of random play before the heuristic takes over.
             exploration: UCT exploration constant.
             capture_bias: probability that a rollout picks a capture when one exists.
+            quantum_rate: probability that a rollout plays a split or merge rather than an
+                ordinary move. Quantum moves vastly outnumber ordinary ones, so choosing
+                uniformly would make rollouts almost all random splits.
             max_group_qubits: stop simulating once an entangled group grows past this size
                 and evaluate statically; keeps rollout cost bounded.
             widening: a node with n visits considers its first ``widening * sqrt(n + 1)``
                 moves.
+            root_lookahead: order the root moves by the evaluation one move ahead, so that
+                progressive widening tries the most promising moves (and not ones that
+                hang the king) first.
             time_limit: optional wall-clock budget in seconds.
             seed: makes the search reproducible.
         """
@@ -92,8 +100,10 @@ class MCTSAgent:
         self.rollout_depth = rollout_depth
         self.exploration = exploration
         self.capture_bias = capture_bias
+        self.quantum_rate = quantum_rate
         self.max_group_qubits = max_group_qubits
         self.widening = widening
+        self.root_lookahead = root_lookahead
         self.time_limit = time_limit
         self.seed = seed
 
@@ -118,6 +128,9 @@ class MCTSAgent:
             return SearchResult(
                 winning, 0, time.perf_counter() - start, [MoveStats(winning, 0, 1.0)]
             )
+        if self.root_lookahead:
+            root.order = self._lookahead_order(board, root_moves, np_rng)
+            root.known.update(root_moves)
 
         while iterations < self.iterations:
             if self.time_limit is not None and time.perf_counter() - start > self.time_limit:
@@ -200,6 +213,25 @@ class MCTSAgent:
             del jumps[:2], quantum[:1]
         return ordered
 
+    @staticmethod
+    def _lookahead_order(
+        board: QuantumBoard, moves: list[QuantumMove], np_rng: np.random.Generator
+    ) -> list[QuantumMove]:
+        """Moves sorted by the mover's evaluation of the position each one leads to.
+
+        Moves that measure are scored on one sampled outcome; the search proper averages
+        over outcomes. The opponent's threats in the resulting position count fully, so a
+        move that leaves the king or a piece en prise sinks to the bottom.
+        """
+        mover = board.turn
+        scored = []
+        for move in moves:
+            trial = board.copy(rng=np_rng)
+            trial.do_move(move)
+            scored.append((win_probability(trial, mover), move))
+        scored.sort(key=lambda item: -item[0])
+        return [move for _, move in scored]
+
     def _select(self, node: _Node, legal: list[QuantumMove]) -> QuantumMove:
         log_parent = math.log(max(node.visits, 1))
 
@@ -223,18 +255,25 @@ class MCTSAgent:
     def _rollout_move(
         self, sim: QuantumBoard, legal: list[QuantumMove], rng: random.Random
     ) -> QuantumMove:
-        captures = []
+        captures: list[QuantumMove] = []
+        jumps: list[QuantumMove] = []
+        quantum: list[QuantumMove] = []
         for move in legal:
             if move.move_type is not MoveType.JUMP:
+                quantum.append(move)
                 continue
             target = sim.piece_at(move.target)
             if target is not None and target.color != sim.turn:
                 if target.kind == KING:
                     return move
                 captures.append(move)
+            else:
+                jumps.append(move)
         if captures and rng.random() < self.capture_bias:
             return rng.choice(captures)
-        return rng.choice(legal)
+        if quantum and (not jumps or rng.random() < self.quantum_rate):
+            return rng.choice(quantum)
+        return rng.choice(jumps or captures)
 
     def _too_entangled(self, sim: QuantumBoard) -> bool:
         return sim.register.largest_group > self.max_group_qubits

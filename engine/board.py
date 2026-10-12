@@ -109,6 +109,7 @@ class QuantumBoard:
         self.winner: Optional[int] = None
         self.draw_reason: Optional[str] = None
         self.history: list[MoveResult] = []
+        self._occupancy_cache: Optional[tuple[int, int, int, int]] = None
 
     def copy(self, rng: Optional[RandomSource] = None) -> "QuantumBoard":
         """An independent copy for search. Measurements in the copy use ``rng``."""
@@ -124,6 +125,7 @@ class QuantumBoard:
         clone.winner = self.winner
         clone.draw_reason = self.draw_reason
         clone.history = list(self.history)
+        clone._occupancy_cache = self._occupancy_cache
         return clone
 
     @classmethod
@@ -213,20 +215,32 @@ class QuantumBoard:
             if other != sq
         }
 
+    def _occupancy(self) -> tuple[int, int, int, int]:
+        """Bitboards (labelled, certainly occupied, certainly white, certainly black).
+
+        Cached until the next move: move generation asks for them once per piece.
+        """
+        if self._occupancy_cache is None:
+            labelled = certain = 0
+            own = [0, 0]
+            for sq, piece in enumerate(self.labels):
+                if piece is None:
+                    continue
+                labelled |= bit(sq)
+                if sq not in self.register:
+                    certain |= bit(sq)
+                    own[piece.color] |= bit(sq)
+            self._occupancy_cache = (labelled, certain, own[WHITE], own[BLACK])
+        return self._occupancy_cache
+
     def _labelled(self) -> int:
-        return sum(bit(sq) for sq, p in enumerate(self.labels) if p is not None)
+        return self._occupancy()[0]
 
     def _certainly_occupied(self) -> int:
-        return sum(
-            bit(sq) for sq, p in enumerate(self.labels) if p is not None and self.is_classical(sq)
-        )
+        return self._occupancy()[1]
 
     def _certainly_own(self, color: int) -> int:
-        return sum(
-            bit(sq)
-            for sq, p in enumerate(self.labels)
-            if p is not None and p.color == color and self.is_classical(sq)
-        )
+        return self._occupancy()[2 + color]
 
     # --- Move shape ------------------------------------------------------------------
 
@@ -392,12 +406,15 @@ class QuantumBoard:
         self.validate(move)
         mover = self.labels[move.source]
 
-        if move.move_type is MoveType.SPLIT:
-            result = self._split(move)
-        elif move.move_type is MoveType.MERGE:
-            result = self._merge(move)
-        else:
-            result = self._jump(move)
+        try:
+            if move.move_type is MoveType.SPLIT:
+                result = self._split(move)
+            elif move.move_type is MoveType.MERGE:
+                result = self._merge(move)
+            else:
+                result = self._jump(move)
+        finally:
+            self._occupancy_cache = None
 
         if result.executed:
             for sq in move.squares:
