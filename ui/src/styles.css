@@ -75,6 +75,17 @@ input {
 
 header {
   grid-area: head;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 h1 {
@@ -525,4 +536,120 @@ button:disabled {
   width: 10px;
   height: 10px;
   border-radius: 3px;
+}
+
+.small {
+  font-size: 12px;
+}
+
+button.primary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.buttons button.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+/* --- Tutorial ------------------------------------------------------------------ */
+
+.tutorial {
+  border-color: var(--accent);
+}
+
+.tutorial h3 {
+  margin: 10px 0 6px;
+  font-size: 17px;
+}
+
+.tutorial p {
+  margin: 0;
+}
+
+.lessons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.lessons button {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.lessons button.done {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.lessons button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 700;
+}
+
+.explain {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+
+.outcomes {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* --- Online -------------------------------------------------------------------- */
+
+.live {
+  margin-left: 6px;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+}
+
+.live.on {
+  color: var(--ok);
+}
+
+.invite {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.invite input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 12px;
+}
+
+.invite button {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
 }

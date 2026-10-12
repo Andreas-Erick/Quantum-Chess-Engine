@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { Board, GROUP_COLORS } from "./components/Board";
 import { type LogEntry, MoveLog } from "./components/MoveLog";
+import { OnlineCard } from "./components/OnlineCard";
+import { TutorialCard } from "./components/TutorialCard";
+import { useLiveFeed } from "./live";
 import { completedMove, type Mode, nextSquares, parseMove, type ParsedMove } from "./moves";
-import type { Color, Correlations, GameState, LevelInfo, LevelName, MoveResponse } from "./types";
-
-const STORAGE_KEY = "quantum-chess:game-id";
-const LEVEL_KEY = "quantum-chess:level";
+import { storage } from "./storage";
+import { accepts, LESSONS, type TutorialProgress } from "./tutorial/lessons";
+import type { Color, Correlations, GameState, LevelInfo, LevelName, LiveMessage, MoveResponse, Seat } from "./types";
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: "jump", label: "Move", hint: "piece → square" },
@@ -14,43 +16,16 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: "merge", label: "Merge", hint: "two halves → square" },
 ];
 
-function readStored(): string | null {
-  // A ?game=<id> link opens that game; otherwise resume the last one played here.
-  const linked = new URLSearchParams(window.location.search).get("game");
-  if (linked) return linked;
-  try {
-    return localStorage.getItem(STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function readLevel(): LevelName | null {
-  try {
-    const stored = localStorage.getItem(LEVEL_KEY);
-    return stored === "easy" || stored === "medium" || stored === "hard" ? stored : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeLevel(level: LevelName) {
-  try {
-    localStorage.setItem(LEVEL_KEY, level);
-  } catch {
-    // storage unavailable: the level resets to the default next visit
-  }
-}
-
-function store(gameId: string) {
-  try {
-    localStorage.setItem(STORAGE_KEY, gameId);
-  } catch {
-    // storage unavailable: the game just won't resume after a reload
-  }
-}
+const REPLY_DELAY_MS = 600; // let the player see their move before a tutorial reply
 
 const isOver = (state: GameState) => !!state.winner || !!state.draw_reason;
+const message = (e: unknown) => String(e instanceof Error ? e.message : e);
+const colorName = (color: Color) => (color === "white" ? "White" : "Black");
+
+/** Keep the address bar pointing at an online game, so a reload reopens it. */
+function setUrlGame(gameId: string | null) {
+  window.history.replaceState(null, "", gameId ? `?game=${encodeURIComponent(gameId)}` : window.location.pathname);
+}
 
 function entriesFromHistory(state: GameState): LogEntry[] {
   return state.history.map((h, i) => ({
@@ -73,62 +48,136 @@ export default function App() {
   const [promotion, setPromotion] = useState("q");
   const [aiColor, setAiColor] = useState<Color | null>("black");
   const [levels, setLevels] = useState<LevelInfo[]>([]);
-  const [level, setLevel] = useState<LevelName>(() => readLevel() ?? "medium");
+  const [level, setLevel] = useState<LevelName>(() => storage.level() ?? "medium");
   const [flipped, setFlipped] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
   const [correlations, setCorrelations] = useState<Correlations | null>(null);
+  const [seat, setSeat] = useState<Seat | null>(null);
+  const [tutorial, setTutorial] = useState<TutorialProgress | null>(null);
+  const [lessonsDone, setLessonsDone] = useState<string[]>(() => storage.lessonsDone());
   const hoverToken = useRef(0);
   const started = useRef(false);
   const aiInFlight = useRef(false);
+  // Plies already shown. Updated synchronously, so a move that arrives twice (as the HTTP
+  // response and on the live feed) is applied once.
+  const plies = useRef(0);
 
   const gameId = state?.game_id;
+  const online = !!state?.seats;
+  const step = tutorial ? LESSONS[tutorial.lesson].steps[tutorial.step] : null;
+  // The AI only plays in ordinary local games.
+  const ai = online || tutorial ? null : aiColor;
 
-  const newGame = useCallback(async () => {
+  const showGame = useCallback((s: GameState, entries: LogEntry[]) => {
+    const held = s.seats ? storage.seat(s.game_id) : null;
+    plies.current = s.history.length;
+    setState(s);
+    setLog(entries);
+    setPicked([]);
+    setCorrelations(null);
+    setSeat(held);
+    if (held) setFlipped(held.color === "black");
+  }, []);
+
+  const run = useCallback(async (task: () => Promise<void>) => {
     setBusy(true);
     setError(null);
     try {
-      const fresh = await api.init();
-      store(fresh.game_id);
-      setState(fresh);
-      setLog([]);
-      setPicked([]);
+      await task();
     } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
+      setError(message(e));
     } finally {
       setBusy(false);
     }
   }, []);
+
+  const newGame = useCallback(
+    () =>
+      run(async () => {
+        const fresh = await api.init();
+        storage.setGameId(fresh.game_id);
+        setUrlGame(null);
+        setTutorial(null);
+        setNotice(null);
+        setFlipped(false);
+        showGame(fresh, []);
+      }),
+    [run, showGame],
+  );
+
+  const resume = useCallback(
+    async (id: string) => {
+      try {
+        const s = await api.state(id);
+        storage.setGameId(id);
+        setUrlGame(s.seats ? id : null);
+        showGame(s, entriesFromHistory(s));
+      } catch {
+        await newGame();
+      }
+    },
+    [newGame, showGame],
+  );
+
+  const join = useCallback(
+    async (id: string) => {
+      if (storage.seat(id)) return resume(id); // already playing in this game
+      try {
+        const joined = await api.joinOnline(id);
+        storage.setSeat(id, { color: joined.color, token: joined.token });
+        storage.setGameId(id);
+        setUrlGame(id);
+        showGame(joined.state, entriesFromHistory(joined.state));
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 409) {
+          await resume(id);
+          setNotice("Both seats are taken, so you are watching this game.");
+        } else {
+          await newGame();
+          setError(`Could not join that game: ${message(e)}`);
+        }
+      }
+    },
+    [newGame, resume, showGame],
+  );
+
+  const createOnline = (color: Color | "random") =>
+    run(async () => {
+      const created = await api.createOnline(color);
+      storage.setSeat(created.game_id, { color: created.color, token: created.token });
+      storage.setGameId(created.game_id);
+      setUrlGame(created.game_id);
+      setNotice(null);
+      showGame(created.state, []);
+    });
 
   useEffect(() => {
     api
       .levels()
       .then((list) => {
         setLevels(list);
-        if (!readLevel()) setLevel(list.find((l) => l.default)?.name ?? "medium");
+        if (!storage.level()) setLevel(list.find((l) => l.default)?.name ?? "medium");
       })
       .catch(() => setLevels([]));
   }, []);
 
-  // Resume the last game if the server still has it, otherwise start a new one.
+  // Open the game from the link (?join=<id> joins it, ?game=<id> opens it) or resume the last one.
   useEffect(() => {
     if (started.current) return; // React StrictMode runs mount effects twice in development
     started.current = true;
-    const stored = readStored();
-    if (!stored) {
-      void newGame();
+    const params = new URLSearchParams(window.location.search);
+    const joinId = params.get("join");
+    if (joinId) {
+      void join(joinId);
       return;
     }
-    api
-      .state(stored)
-      .then((s) => {
-        store(s.game_id);
-        setState(s);
-        setLog(entriesFromHistory(s));
-      })
-      .catch(() => void newGame());
-  }, [newGame]);
+    const stored = params.get("game") ?? storage.gameId();
+    if (stored) void resume(stored);
+    else void newGame();
+  }, [join, newGame, resume]);
 
   useEffect(() => {
     if (!gameId || !state || isOver(state)) {
@@ -139,13 +188,15 @@ export default function App() {
     api
       .legalMoves(gameId)
       .then((moves) => !cancelled && setLegal(moves.map(parseMove)))
-      .catch((e) => !cancelled && setError(String(e.message ?? e)));
+      .catch((e) => !cancelled && setError(message(e)));
     return () => {
       cancelled = true;
     };
   }, [gameId, state]);
 
   const applyResponse = useCallback((response: MoveResponse, search?: LogEntry["search"]) => {
+    if (response.state.history.length <= plies.current) return; // already shown
+    plies.current = response.state.history.length;
     setLog((previous) => [
       ...previous,
       {
@@ -168,22 +219,85 @@ export default function App() {
     }
   }, []);
 
-  const play = useCallback(
-    async (notation: string) => {
-      if (!gameId) return;
-      setBusy(true);
-      setError(null);
-      try {
-        applyResponse(await api.move(gameId, notation));
-      } catch (e) {
-        setError(String(e instanceof Error ? e.message : e));
-        setPicked([]);
-      } finally {
-        setBusy(false);
+  // --- Online: the opponent's moves and arrivals come over the live feed ---------------
+
+  const onLive = useCallback(
+    (live: LiveMessage) => {
+      const fresh = live.state;
+      if (fresh.game_id !== gameId) return;
+      const known = plies.current;
+      if (live.type === "move" && fresh.history.length === known + 1) {
+        applyResponse(live);
+      } else if (fresh.history.length > known) {
+        // Missed moves while disconnected: rebuild the log from the history.
+        plies.current = fresh.history.length;
+        setState(fresh);
+        setLog(entriesFromHistory(fresh));
+      } else if (fresh.history.length === known) {
+        setState(fresh); // a player joined
       }
     },
     [gameId, applyResponse],
   );
+  const connected = useLiveFeed(online && gameId ? gameId : null, onLive);
+
+  // --- Tutorial ----------------------------------------------------------------------
+
+  const startLesson = (index: number) =>
+    run(async () => {
+      const lesson = LESSONS[index];
+      const fresh = await api.init(lesson.fen);
+      setUrlGame(null);
+      setNotice(null);
+      setFlipped(false);
+      showGame(fresh, []);
+      for (const notation of lesson.setup ?? []) applyResponse(await api.move(fresh.game_id, notation));
+      setTutorial({ lesson: index, step: 0, done: false });
+      setMode(lesson.steps[0].mode);
+    });
+
+  const exitTutorial = () => {
+    setTutorial(null);
+    const stored = storage.gameId();
+    void run(() => (stored ? resume(stored) : newGame()));
+  };
+
+  const advanceTutorial = async (id: string, progress: TutorialProgress) => {
+    const lesson = LESSONS[progress.lesson];
+    const current = lesson.steps[progress.step];
+    if (progress.step + 1 < lesson.steps.length) {
+      if (current.reply) {
+        await new Promise((resolve) => window.setTimeout(resolve, REPLY_DELAY_MS));
+        applyResponse(await api.move(id, current.reply));
+      }
+      setTutorial({ ...progress, step: progress.step + 1 });
+      setMode(lesson.steps[progress.step + 1].mode);
+      return;
+    }
+    setTutorial({ ...progress, done: true });
+    if (!lessonsDone.includes(lesson.id)) {
+      const done = [...lessonsDone, lesson.id];
+      setLessonsDone(done);
+      storage.setLessonsDone(done);
+    }
+  };
+
+  // --- Moves ---------------------------------------------------------------------------
+
+  const play = async (notation: string) => {
+    if (!gameId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      applyResponse(await api.move(gameId, notation, seat?.token));
+      if (tutorial) await advanceTutorial(gameId, tutorial);
+    } catch (e) {
+      setError(message(e));
+      setPicked([]);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const aiMove = useCallback(async () => {
     if (!gameId || aiInFlight.current) return;
@@ -194,7 +308,7 @@ export default function App() {
       const response = await api.aiMove(gameId, level);
       applyResponse(response, response.search);
     } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
+      setError(message(e));
     } finally {
       aiInFlight.current = false;
       setBusy(false);
@@ -203,15 +317,29 @@ export default function App() {
 
   // Let the AI answer automatically when it is its turn.
   useEffect(() => {
-    if (state && !isOver(state) && !busy && aiColor === state.turn) {
+    if (state && !isOver(state) && !busy && ai === state.turn) {
       void aiMove();
     }
-  }, [state, busy, aiColor, aiMove]);
+  }, [state, busy, ai, aiMove]);
 
-  const humanTurn = !!state && !isOver(state) && state.turn !== aiColor && !busy;
+  const bothSeated = !!state?.seats && state.seats.white && state.seats.black;
+  const myTurn = !state
+    ? false
+    : online
+      ? seat?.color === state.turn && bothSeated
+      : tutorial
+        ? !tutorial.done
+        : state.turn !== ai;
+  const humanTurn = !!state && !isOver(state) && !busy && myTurn;
+
+  // In the tutorial, only the moves the lesson asks for can be played.
+  const playable = useMemo(
+    () => (step ? legal.filter((m) => accepts(step, m.notation)) : legal),
+    [legal, step],
+  );
   const selectable = useMemo(
-    () => (humanTurn ? nextSquares(mode, picked, legal) : new Set<string>()),
-    [humanTurn, mode, picked, legal],
+    () => (humanTurn ? nextSquares(mode, picked, playable) : new Set<string>()),
+    [humanTurn, mode, picked, playable],
   );
 
   const onClick = (square: string) => {
@@ -222,11 +350,11 @@ export default function App() {
     }
     if (!selectable.has(square)) {
       // Clicking a fresh piece restarts the selection.
-      setPicked(nextSquares(mode, [], legal).has(square) ? [square] : []);
+      setPicked(nextSquares(mode, [], playable).has(square) ? [square] : []);
       return;
     }
     const next = [...picked, square];
-    const move = completedMove(mode, next, legal, promotion);
+    const move = completedMove(mode, next, playable, promotion);
     if (move) void play(move);
     else setPicked(next);
   };
@@ -247,13 +375,20 @@ export default function App() {
   const last = log.length ? parseMove(log[log.length - 1].notation) : null;
   const counts = useMemo(() => {
     const result: Record<Mode, number> = { jump: 0, split: 0, merge: 0 };
-    legal.forEach((m) => result[m.type]++);
+    playable.forEach((m) => result[m.type]++);
     return result;
-  }, [legal]);
+  }, [playable]);
 
   if (!state) {
     return <main className="loading">{error ? `Cannot reach the engine: ${error}` : "Connecting to the engine…"}</main>;
   }
+
+  const lastOwnMove = tutorial?.done ? log[log.length - 1] : undefined;
+
+  let waiting: string | null = null;
+  if (busy && ai === state.turn) waiting = "AI is thinking…";
+  else if (online && !bothSeated) waiting = "Waiting for your friend to join…";
+  else if (online && seat && seat.color !== state.turn) waiting = `Waiting for ${colorName(state.turn)} to move…`;
 
   return (
     <main className="app">
@@ -261,6 +396,14 @@ export default function App() {
         <h1>
           Quantum Chess <span className="muted">· superposition, entanglement, measurement</span>
         </h1>
+        {!tutorial && (
+          <div className="header-actions">
+            {lessonsDone.length === 0 && <span className="muted small">New here?</span>}
+            <button className="primary" onClick={() => void startLesson(0)} disabled={busy}>
+              Learn to play
+            </button>
+          </div>
+        )}
       </header>
 
       <section className="play">
@@ -277,14 +420,15 @@ export default function App() {
         />
         <div className="status" role="status">
           {state.winner ? (
-            <strong className="winner">{state.winner === "white" ? "White" : "Black"} captured the king and wins.</strong>
+            <strong className="winner">{colorName(state.winner)} captured the king and wins.</strong>
           ) : state.draw_reason ? (
             <strong className="winner">Draw by {state.draw_reason}.</strong>
-          ) : busy && aiColor === state.turn ? (
-            <span>AI is thinking…</span>
+          ) : waiting ? (
+            <span>{waiting}</span>
           ) : (
             <span>
-              <span className={`dot ${state.turn}`} /> {state.turn === "white" ? "White" : "Black"} to move
+              <span className={`dot ${state.turn}`} /> {colorName(state.turn)} to move
+              {online && seat?.color === state.turn && " (you)"}
               {checkSquares.length > 0 && (
                 <strong className="check-warning">
                   {" "}
@@ -295,11 +439,23 @@ export default function App() {
               {picked.length > 0 && <span className="muted"> · picked {picked.join(", ")}</span>}
             </span>
           )}
+          {notice && <span className="muted">{notice}</span>}
           {error && <span className="error">{error}</span>}
         </div>
       </section>
 
       <aside className="panel">
+        {tutorial && (
+          <TutorialCard
+            progress={tutorial}
+            lessonsDone={lessonsDone}
+            measurements={lastOwnMove?.measurements ?? []}
+            busy={busy}
+            onLesson={(i) => void startLesson(i)}
+            onExit={exitTutorial}
+          />
+        )}
+
         <div className="card">
           <h2>Your move</h2>
           <div className="modes" role="radiogroup" aria-label="Move type">
@@ -331,50 +487,60 @@ export default function App() {
           </label>
         </div>
 
-        <div className="card">
-          <h2>Game</h2>
-          <label className="row">
-            AI plays
-            <select
-              value={aiColor ?? "none"}
-              onChange={(e) => setAiColor(e.target.value === "none" ? null : (e.target.value as Color))}
-            >
-              <option value="black">Black</option>
-              <option value="white">White</option>
-              <option value="none">Nobody</option>
-            </select>
-          </label>
-          {levels.length > 0 && (
-            <>
-              <div className="modes levels" role="radiogroup" aria-label="AI strength">
-                {levels.map((l) => (
-                  <button
-                    key={l.name}
-                    role="radio"
-                    aria-checked={level === l.name}
-                    className={level === l.name ? "active" : ""}
-                    onClick={() => {
-                      setLevel(l.name);
-                      storeLevel(l.name);
-                    }}
+        {!tutorial && (
+          <div className="card">
+            <h2>Game</h2>
+            {!online && (
+              <>
+                <label className="row">
+                  AI plays
+                  <select
+                    value={aiColor ?? "none"}
+                    onChange={(e) => setAiColor(e.target.value === "none" ? null : (e.target.value as Color))}
                   >
-                    <strong>{l.label}</strong>
-                  </button>
-                ))}
-              </div>
-              <p className="muted level-hint">{levels.find((l) => l.name === level)?.description}</p>
-            </>
-          )}
-          <div className="buttons">
-            <button onClick={() => void aiMove()} disabled={busy || isOver(state)}>
-              AI move now
-            </button>
-            <button onClick={() => setFlipped(!flipped)}>Flip board</button>
-            <button onClick={() => void newGame()} disabled={busy}>
-              New game
-            </button>
+                    <option value="black">Black</option>
+                    <option value="white">White</option>
+                    <option value="none">Nobody</option>
+                  </select>
+                </label>
+                {levels.length > 0 && (
+                  <>
+                    <div className="modes levels" role="radiogroup" aria-label="AI strength">
+                      {levels.map((l) => (
+                        <button
+                          key={l.name}
+                          role="radio"
+                          aria-checked={level === l.name}
+                          className={level === l.name ? "active" : ""}
+                          onClick={() => {
+                            setLevel(l.name);
+                            storage.setLevel(l.name);
+                          }}
+                        >
+                          <strong>{l.label}</strong>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="muted level-hint">{levels.find((l) => l.name === level)?.description}</p>
+                  </>
+                )}
+              </>
+            )}
+            <div className="buttons">
+              {!online && (
+                <button onClick={() => void aiMove()} disabled={busy || isOver(state)}>
+                  AI move now
+                </button>
+              )}
+              <button onClick={() => setFlipped(!flipped)}>Flip board</button>
+              <button onClick={() => void newGame()} disabled={busy}>
+                {online ? "Leave & new game" : "New game"}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
+
+        {!tutorial && <OnlineCard state={state} seat={seat} connected={connected} busy={busy} onCreate={createOnline} />}
 
         <div className="card log-card">
           <h2>Moves &amp; measurements</h2>

@@ -26,6 +26,7 @@ class MoveRequest(BaseModel):
     target1: Optional[SquareName] = None
     target2: Optional[SquareName] = Field(None, description="Second target of a split")
     promotion: Optional[Literal["q", "r", "b", "n"]] = None
+    token: Optional[str] = Field(None, description="Seat token; required in online games")
 
     @model_validator(mode="after")
     def _check_fields(self) -> "MoveRequest":
@@ -107,6 +108,10 @@ class GameState(BaseModel):
     pieces: list[PieceInfo]
     entanglement_groups: list[list[SquareName]]
     history: list[HistoryEntry]
+    seats: Optional[dict[Color, bool]] = Field(
+        None,
+        description="Online games only: which colours a player has claimed. Null for local games",
+    )
 
 
 class MoveResponse(BaseModel):
@@ -156,3 +161,22 @@ class LevelInfo(BaseModel):
 class LegalMovesResponse(BaseModel):
     game_id: str
     moves: list[str]
+
+
+class OnlineCreateRequest(BaseModel):
+    color: Literal["white", "black", "random"] = Field("white", description="The creator's side")
+    fen: Optional[str] = None
+    seed: Optional[int] = None
+
+
+class JoinRequest(BaseModel):
+    game_id: str
+
+
+class SeatResponse(BaseModel):
+    """A claimed seat. Keep the token secret: it is what lets you move for ``color``."""
+
+    game_id: str
+    color: Color
+    token: str
+    state: GameState

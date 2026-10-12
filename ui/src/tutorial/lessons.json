@@ -1,0 +1,112 @@
+[
+  {
+    "id": "goal",
+    "title": "Capture the king",
+    "fen": "k7/8/8/8/8/8/8/R3K3 w - - 0 1",
+    "steps": [
+      {
+        "mode": "jump",
+        "accept": ["a1a8"],
+        "prompt": "Quantum chess has no checkmate. You win by actually capturing the enemy king. Click your rook on a1, then the black king on a8.",
+        "explain": "That's the whole goal. Everything else is the usual chess moves, plus three quantum moves you'll learn next."
+      }
+    ]
+  },
+  {
+    "id": "check",
+    "title": "Check",
+    "fen": "4k3/8/8/8/8/8/8/r3K3 w - - 0 1",
+    "steps": [
+      {
+        "mode": "jump",
+        "accept": ["e1d2", "e1e2", "e1f2"],
+        "prompt": "Your king is outlined in red: that means check. The rook on a1 could capture it next move, and capturing the king wins. Step off the first rank: move the king to d2, e2 or f2.",
+        "explain": "Safe. Unlike normal chess, you are allowed to leave your king in check, but then your opponent can take it and win. Watch for the red outline."
+      }
+    ]
+  },
+  {
+    "id": "split",
+    "title": "Superposition",
+    "fen": "4k3/8/8/8/8/8/8/4K1N1 w - - 0 1",
+    "steps": [
+      {
+        "mode": "split",
+        "accept": ["g1^"],
+        "prompt": "A split move sends one piece to two empty squares at once. Click the knight on g1, then two squares it can reach (for example f3 and h3).",
+        "explain": "The knight is now in superposition: 50% on each square. It is faded and the percentage shows how likely it is to be there. Both halves share a coloured ring because they belong together."
+      }
+    ]
+  },
+  {
+    "id": "merge",
+    "title": "Interference",
+    "fen": "4k3/8/8/8/8/8/8/4K1N1 w - - 0 1",
+    "steps": [
+      {
+        "mode": "split",
+        "accept": ["g1^f3h3"],
+        "prompt": "First split the knight from g1 to f3 and h3. Black will reply.",
+        "reply": "e8d8"
+      },
+      {
+        "mode": "merge",
+        "accept": ["f3h3^g1"],
+        "prompt": "Now merge it back: pick Merge, click both halves (f3 and h3), then g1.",
+        "explain": "The knight is back on g1 with certainty. This is quantum interference: a merge undoes a split exactly, as long as neither half moved in between."
+      }
+    ]
+  },
+  {
+    "id": "split-again",
+    "title": "Splitting again",
+    "fen": "4k3/8/8/8/8/8/8/4K1N1 w - - 0 1",
+    "steps": [
+      {
+        "mode": "split",
+        "accept": ["g1^f3h3"],
+        "prompt": "Split the knight from g1 to f3 and h3.",
+        "reply": "e8d8"
+      },
+      {
+        "mode": "split",
+        "accept": ["f3^"],
+        "prompt": "A half can split again. Click the 50% knight on f3, then two empty squares it can reach.",
+        "explain": "Now the knight is 50% on h3 and 25% on each new square. A piece can't be split below 25%, so these quarters can't split any further."
+      }
+    ]
+  },
+  {
+    "id": "measurement",
+    "title": "Measurement",
+    "fen": "4k3/8/8/8/1n6/8/8/3RK3 b - - 0 1",
+    "setup": ["b4^d3d5"],
+    "steps": [
+      {
+        "mode": "jump",
+        "accept": ["d1d3"],
+        "prompt": "Black split a knight to d3 and d5. If it is on d3 it attacks your king, so e1 is in check with 50% probability. Capture on d3 with your rook.",
+        "explain": "Capturing an uncertain piece asks the board a question: is the knight really on d3? Nature answers with the true probability, and the knight collapses to one square. Its other half vanishes or becomes certain. Restart the lesson to try your luck again."
+      }
+    ]
+  },
+  {
+    "id": "entanglement",
+    "title": "Entanglement",
+    "fen": "4k3/8/8/8/8/8/8/3QK1N1 w - - 0 1",
+    "steps": [
+      {
+        "mode": "split",
+        "accept": ["g1^f3h3"],
+        "prompt": "Split the knight from g1 to f3 and h3.",
+        "reply": "e8e7"
+      },
+      {
+        "mode": "jump",
+        "accept": ["d1h5"],
+        "prompt": "Now slide the queen from d1 to h5. Her path crosses f3, where your knight may or may not be.",
+        "explain": "The queen only got through if the knight is not on f3, so she is now 50% on h5 and 50% still on d1. Her fate is entangled with the knight's: the rings share a colour. Hover a ringed square to see how the others depend on it."
+      }
+    ]
+  }
+]
