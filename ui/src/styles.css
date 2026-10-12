@@ -653,3 +653,16 @@ button.primary {
   padding: 6px 10px;
   cursor: pointer;
 }
+
+.invite.join {
+  margin-top: 12px;
+}
+
+.fairness {
+  margin: 10px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.fairness code {
+  font-size: 11px;
+}

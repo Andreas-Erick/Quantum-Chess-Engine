@@ -57,8 +57,8 @@ Or run it from source:
 pip install -r requirements-desktop.txt
 (cd ui && npm ci && npm run build)
 python -m desktop                          # the game in its own window, engine in-process
-python -m desktop --lan                    # let a friend on your network join online games
-python -m desktop --server https://...     # open a hosted server to play friends anywhere
+python -m desktop --lan                    # start hosting on your network right away
+python -m desktop --server https://...     # open a hosted server instead of a local one
 pyinstaller desktop/quantum_chess.spec     # build dist/QuantumChess yourself
 iscc /DAppVersion=1.2.3 desktop/installer.iss   # then the Windows installer (Inno Setup 6)
 ```
@@ -69,17 +69,39 @@ the server hosts. Pushing a `v*` tag builds both installers in CI and attaches t
 </details>
 
 <details>
-<summary>Play a friend online</summary>
+<summary>Play a friend</summary>
 
-In the **Play a friend online** card, choose your colour and click **Create invite link**, then send
-the link to your friend. Opening it takes the other seat. Moves appear on both screens instantly
-over a WebSocket, and each browser can move only its own side. Spectators can open the
-`?game=<id>` link to watch.
+**With the desktop app**, one player hosts and the other joins. No server to set up:
 
-Your friend has to be able to reach the server. On the same network, use `python -m desktop --lan`
-(or `uvicorn api.server:app --host 0.0.0.0`). Over the internet, deploy the Docker image to any
-container host (Render, Fly.io, a VPS) and share links from there. Put it behind HTTPS so the live
-feed runs over `wss://`.
+1. The host clicks **Host a game** in the **Play a friend** card. Their app starts accepting
+   players from the local network, and the invite link points at it
+   (`http://192.168.1.20:52814/?join=…`). Windows may ask to allow Quantum Chess through the
+   firewall the first time.
+2. The friend pastes the link into **Join** in their own app, or opens it in any browser.
+3. Moves appear on both screens instantly over a WebSocket, and each player can move only their
+   own side. **Game ▸ My games** returns to your own games afterwards.
+
+**In a browser**, click **Create invite link** and send it. That works whenever your friend can
+reach the server: on the same network (`uvicorn api.server:app --host 0.0.0.0`), or anywhere if
+you deploy the Docker image to a container host (Render, Fly.io, a VPS). Put it behind HTTPS so
+the live feed runs over `wss://`.
+
+**Playing over the internet without deploying.** A host's computer is normally behind a home
+router, so a friend elsewhere can't reach it directly. Put both machines on one private network
+with [Tailscale](https://tailscale.com) (free for personal use) and host as above, or expose the
+host's port with a tunnel such as `cloudflared tunnel --url http://localhost:<port>` and invite
+with the tunnel's address.
+
+**Fair dice.** When one player hosts, their app rolls the dice for every measurement, so it could
+choose the outcomes. Both players seed the dice instead: the server commits to a secret (only its
+SHA-256 is published) before the friend joins with a random seed of their own, measurement *n*
+uses `sha256(secret ‖ seed ‖ n)`, and the secret is revealed when the game ends. The joiner then
+replays the game with the same dice: **Game ▸ Verify this game's dice** in the desktop app, or
+`python -m api.fairness <game link> --seed <your seed>`. The desktop app generates and keeps the
+joiner's seed itself, out of the host's reach; a browser joining on the host's own page runs the
+host's code, so it can only trust the host. A host running modified code could still *peek* at
+upcoming outcomes during a game (the server must know the seed to roll), which only a neutral
+server rules out. Details in [`api/fairness.py`](api/fairness.py).
 
 </details>
 
@@ -99,7 +121,7 @@ feed runs over `wss://`.
   outcomes in proportion to their true probabilities. Progressive widening keeps the search
   focused despite hundreds of possible splits per position. Improvements are measured, not
   guessed: an arena plays agent versions against each other.
-- **Tested hard where things are random.** 208 Python tests and 13 UI tests: perft-verified move
+- **Tested hard where things are random.** 223 Python tests and 17 UI tests: perft-verified move
   generation, forced and statistical measurement outcomes, A→B→C entanglement chains, and
   random-play invariant checks. CI runs everything plus a Docker smoke test.
 
@@ -209,8 +231,14 @@ replays every lesson on the engine and checks what the text claims, for example 
 ends up 50% on h5 and entangled with the knight.
 
 **Online games** give each player a secret seat token; `/do_move` accepts a move only with the
-token of the side to move. Every move is pushed to `/ws` subscribers, so both screens update
-instantly and a reconnecting client catches up from the full history.
+token of the side to move, and only once both players are seated. Every move is pushed to `/ws`
+subscribers, so both screens update instantly and a reconnecting client catches up from the full
+history. The dice are seeded by both sides and verifiable afterwards (see *Play a friend* above).
+
+**The desktop app** runs the same FastAPI app in-process on `127.0.0.1`. **Host a game** starts a
+second listener for the same app on the local network. The page talks to the app through a small
+bridge (`window.pywebview.api`) that refuses hosting and joining on any page but the app's own,
+because a friend's page loaded in the same window gets the bridge too.
 
 ## API
 
@@ -226,12 +254,15 @@ instantly and a reconnecting client catches up from the full history.
 | `GET` | `/correlations?game_id=&square=` | Entangled squares' probabilities given that square is occupied / empty |
 | `POST` | `/ai_move` | MCTS move (`{game_id, iterations?, rollout_depth?, time_limit?, seed?}`) |
 | `POST` | `/online/create` | Online game (`{color: white\|black\|random}`) → `{game_id, color, token, state}` |
-| `POST` | `/online/join` | Take the open seat (`{game_id}`) → `{game_id, color, token, state}`; `409` if full |
+| `POST` | `/online/join` | Take the open seat (`{game_id, seed?}`) → `{game_id, color, token, state}`; `409` if full |
 | `WS` | `/ws?game_id=` | Live feed: `{type: "state", state}` on connect and joins, `{type: "move", ...}` per move |
 | `GET` | `/health` | Liveness probe |
 
+Online games' `GameState` carries `fairness`: the server's `commitment`, the joiner's
+`guest_seed`, and the `secret` once the game is over.
+
 Errors: `400` illegal move or bad FEN, `403` not your turn in an online game (or AI requested
-there), `404` unknown game, `409` game over, `422` malformed
+there), `404` unknown game, `409` game over or opponent not seated yet, `422` malformed
 payload. Every move response lists its measurements: what was asked, the prior probability, the
 outcome, and every square that collapsed.
 
@@ -281,21 +312,23 @@ engine/
 api/
   schemas.py        Pydantic models: the JSON contract
   server.py         FastAPI endpoints, online seats, /ws live feed, serves the UI
+  fairness.py       jointly seeded dice for online games, and verifying them
 agent/
   heuristics.py     probability-weighted evaluation with a one-capture threat term
   mcts.py           open-loop MCTS with progressive widening and root lookahead
   arena.py          agent-vs-agent matches for measuring strength
   client.py         remote agent that plays using only the API
 desktop/
-  app.py            native window (pywebview) around an in-process server
+  app.py            native window, in-process server, hosting and joining, Game menu
   quantum_chess.spec  PyInstaller build for Windows and macOS
 ui/src/
   components/       Board, MoveLog, TutorialCard, OnlineCard
   tutorial/         lessons.json and its types
   live.ts           live-feed WebSocket with reconnects
+  desktop.ts        the desktop app bridge (host, join, back to my games)
   moves.ts          clicks -> move notation, driven by the legal-move list
 tests/              classical, superposition, measurement, entanglement, rules, agent, arena, api,
-                    online, tutorial, desktop
+                    online, fairness, tutorial, desktop
 ```
 
 </details>
@@ -304,7 +337,7 @@ tests/              classical, superposition, measurement, entanglement, rules, 
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                                   # 208 tests, ~10 s
+pytest -q                                   # 223 tests, ~12 s
 black --check . && flake8
 cd ui && npm ci && npm test && npm run build
 cd ui && npm run dev                        # UI with hot reload on :5173 (proxies to :8000)
@@ -322,6 +355,8 @@ python -m agent.arena --games 40 --a iterations=400 --b iterations=100   # agent
   or a database would make the API stateless; the live feed would then need a pub/sub channel.
 - There are no accounts: whoever holds a seat token plays that side, and anyone with the game
   link can watch.
+- Hosting from the desktop app reaches only the local network. Over the internet it needs a VPN
+  like Tailscale or a tunnel, or a deployed server; there is no built-in NAT traversal.
 - The desktop builds are unsigned, so Windows SmartScreen and macOS Gatekeeper warn on first
   launch.
 
