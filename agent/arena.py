@@ -16,7 +16,7 @@ import argparse
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Any, Optional, Protocol
 
 import numpy as np
 
@@ -119,10 +119,11 @@ def match(
     workers: Optional[int] = None,
 ) -> MatchResult:
     """Play ``games`` games (rounded up to even) between ``a`` and ``b``, swapping colours."""
-    jobs = []
-    for i in range((games + 1) // 2):
-        for color in (WHITE, BLACK):
-            jobs.append((a, b, first_seed + i, color, max_plies))
+    jobs = [
+        (a, b, first_seed + i, color, max_plies)
+        for i in range((games + 1) // 2)
+        for color in (WHITE, BLACK)
+    ]
     if workers == 1:
         return MatchResult([_play(job) for job in jobs])
     with ProcessPoolExecutor(max_workers=workers) as pool:
@@ -130,7 +131,7 @@ def match(
 
 
 def _agent_from(spec: list[str], seed: int) -> MCTSAgent:
-    kwargs = {}
+    kwargs: dict[str, Any] = {}
     for item in spec:
         key, value = item.split("=")
         kwargs[key] = float(value) if "." in value else int(value)

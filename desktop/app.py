@@ -101,7 +101,7 @@ def start_server(
     )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, name=f"server-{host}:{port}", daemon=True)
-    server.thread = thread  # for stop_server
+    server.thread = thread  # type: ignore[attr-defined]  # read by stop_server
     thread.start()
     deadline = time.monotonic() + timeout
     while not server.started:
@@ -170,7 +170,8 @@ def origin_of(url: str) -> str:
 
 def game_of(url: str) -> Optional[str]:
     query = parse_qs(urlsplit(url).query)
-    return (query.get("game") or query.get("join") or [None])[0]
+    values = query.get("game") or query.get("join")
+    return values[0] if values else None
 
 
 class JoinedGames:
@@ -267,10 +268,10 @@ class Desktop:
     def _share_online(self, tunnel_command: Optional[list[str]] = None) -> str:
         from desktop.tunnel import Tunnel
 
-        self._start_hosting()
+        lan_url = self._start_hosting()
         with self._lock:
             if self._tunnel is None:
-                port = int(self._lan_url.rsplit(":", 1)[1])
+                port = int(lan_url.rsplit(":", 1)[1])
                 tunnel = Tunnel(port, tunnel_command)
                 tunnel.start()  # raises TunnelError with a message for the player
                 self._tunnel = tunnel
@@ -283,7 +284,8 @@ class Desktop:
                 self._tunnel = None
             if self._lan_server is not None:
                 stop_server(self._lan_server)
-                self._allowed.discard(origin_of(self._lan_url))
+                if self._lan_url is not None:
+                    self._allowed.discard(origin_of(self._lan_url))
                 self._lan_server = self._lan_url = None
 
     def _check_page(self) -> None:
@@ -395,7 +397,8 @@ def redirect_output() -> None:
     file in the data directory instead."""
     if sys.stdout is not None and sys.stderr is not None:
         return
-    log = open(data_dir() / "quantum-chess.log", "w", encoding="utf-8", buffering=1)
+    # Open for the rest of the process's life: it becomes stdout and stderr.
+    log = open(data_dir() / "quantum-chess.log", "w", encoding="utf-8", buffering=1)  # noqa: SIM115
     sys.stdout = sys.stdout or log
     sys.stderr = sys.stderr or log
 

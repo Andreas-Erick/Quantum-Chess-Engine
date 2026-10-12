@@ -34,6 +34,7 @@ from typing import Optional
 
 from engine.bitboard import (
     BETWEEN,
+    BISHOP,
     BLACK,
     KING,
     KING_ATTACKS,
@@ -42,9 +43,8 @@ from engine.bitboard import (
     PAWN,
     PAWN_ATTACKS,
     QUEEN,
-    WHITE,
-    BISHOP,
     ROOK,
+    WHITE,
     bishop_attacks,
     bit,
     file_of,
@@ -111,7 +111,7 @@ class QuantumBoard:
         self.history: list[MoveResult] = []
         self._occupancy_cache: Optional[tuple[int, int, int, int]] = None
 
-    def copy(self, rng: Optional[RandomSource] = None) -> "QuantumBoard":
+    def copy(self, rng: Optional[RandomSource] = None) -> QuantumBoard:
         """An independent copy for search. Measurements in the copy use ``rng``."""
         clone = QuantumBoard.__new__(QuantumBoard)
         clone.initial_fen = self.initial_fen
@@ -131,7 +131,7 @@ class QuantumBoard:
     @classmethod
     def replay(
         cls, fen: str, records: list[tuple[str, list[bool]]], rng: Optional[RandomSource] = None
-    ) -> "QuantumBoard":
+    ) -> QuantumBoard:
         """Rebuild a game from its moves and their measurement outcomes.
 
         Because outcomes are recorded, the replay reproduces the exact quantum state, so a
@@ -314,6 +314,14 @@ class QuantumBoard:
 
     # --- Validation & generation -----------------------------------------------------
 
+    def _piece(self, sq: int) -> Piece:
+        """The piece labelled on ``sq``, for a square known to have one, such as the source of
+        a move that passed :meth:`validate`."""
+        piece = self.labels[sq]
+        if piece is None:
+            raise AssertionError(f"no piece labelled on {square_name(sq)}")
+        return piece
+
     def _own_piece(self, sq: int) -> Piece:
         piece = self.labels[sq]
         if piece is None or piece.color != self.turn:
@@ -342,26 +350,26 @@ class QuantumBoard:
             raise IllegalMoveError("pawns cannot split or merge")
 
         if move.move_type is MoveType.SPLIT:
-            if move.target == move.target2:
+            t1, t2 = move.split_targets
+            if t1 == t2:
                 raise IllegalMoveError("split targets must differ")
             if not self.can_split(move.source):
                 raise IllegalMoveError(
                     f"{piece.symbol} on {square_name(move.source)} is too uncertain to split again"
                 )
             reach = self.reachable(move.source, slide=False)
-            for t in (move.target, move.target2):
+            for t in (t1, t2):
                 if not reach & bit(t) or self.labels[t] is not None:
                     raise IllegalMoveError(f"cannot split onto {square_name(t)}")
             return
 
         # Merge
-        if move.source == move.source2 or self.labels[move.source2] != piece:
+        s1, s2 = move.merge_sources
+        if s1 == s2 or self.labels[s2] != piece:
             raise IllegalMoveError("merge needs two parts of the same kind of piece")
-        if self.is_classical(move.source) or self.is_classical(move.source2):
+        if self.is_classical(s1) or self.is_classical(s2):
             raise IllegalMoveError("both merge sources must be in superposition")
-        common = self.reachable(move.source, slide=False) & self.reachable(
-            move.source2, slide=False
-        )
+        common = self.reachable(s1, slide=False) & self.reachable(s2, slide=False)
         if not common & bit(move.target) or self.labels[move.target] is not None:
             raise IllegalMoveError(f"cannot merge onto {square_name(move.target)}")
 
@@ -404,7 +412,7 @@ class QuantumBoard:
         if isinstance(move, str):
             move = QuantumMove.parse(move)
         self.validate(move)
-        mover = self.labels[move.source]
+        mover = self._piece(move.source)
 
         try:
             if move.move_type is MoveType.SPLIT:
@@ -451,24 +459,26 @@ class QuantumBoard:
         return measurement
 
     def _split(self, move: QuantumMove) -> MoveResult:
-        piece = self.labels[move.source]
-        for sq in (move.source, move.target, move.target2):
+        piece = self._piece(move.source)
+        t1, t2 = move.split_targets
+        for sq in (move.source, t1, t2):
             self._activate(sq)
-        self.labels[move.target] = self.labels[move.target2] = piece
+        self.labels[t1] = self.labels[t2] = piece
         q = square_qubit
-        self._apply(split_ops(q(move.source), q(move.target), q(move.target2)))
+        self._apply(split_ops(q(move.source), q(t1), q(t2)))
         return MoveResult(move, executed=True)
 
     def _merge(self, move: QuantumMove) -> MoveResult:
+        s1, s2 = move.merge_sources
         self._activate(move.target)
-        self.labels[move.target] = self.labels[move.source]
+        self.labels[move.target] = self._piece(s1)
         q = square_qubit
-        self._apply(merge_ops(q(move.source), q(move.source2), q(move.target)))
+        self._apply(merge_ops(q(s1), q(s2), q(move.target)))
         return MoveResult(move, executed=True)
 
     def _jump(self, move: QuantumMove) -> MoveResult:
         src, tgt = move.source, move.target
-        piece = self.labels[src]
+        piece = self._piece(src)
         result = MoveResult(move, executed=False)
 
         if piece.kind == KING and abs(tgt - src) == 2:
@@ -546,7 +556,7 @@ class QuantumBoard:
         only in the branches where the whole path is empty, which entangles it with them.
         """
         src, tgt = move.source, move.target
-        piece = self.labels[src]
+        piece = self._piece(src)
         if piece.kind == PAWN and rank_of(tgt) in (0, 7):
             piece = Piece(piece.color, move.promotion if move.promotion is not None else QUEEN)
         if self.is_classical(src) and not path:

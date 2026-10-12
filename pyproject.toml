@@ -5,8 +5,48 @@ description = "Chess with superposition, entanglement and measurement, simulated
 requires-python = ">=3.10"
 license = { text = "MIT" }
 
-[tool.black]
+[tool.ruff]
 line-length = 100
+target-version = "py310"
+extend-exclude = ["ui", "*.md"]  # docs keep their hand-aligned code examples
+
+[tool.ruff.lint]
+# pycodestyle and pyflakes (what flake8 checked), plus likely bugs (B), modern syntax (UP),
+# simplifications (SIM, C4, PIE, PERF), sorted imports (I) and stale noqa comments (RUF100).
+select = ["E", "W", "F", "B", "UP", "SIM", "C4", "PIE", "PERF", "I", "RUF100"]
+ignore = [
+    "UP007",  # keep Optional[X] / Union: the codebase uses them consistently
+    "UP045",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["engine", "agent", "api", "desktop"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
+plugins = ["pydantic.mypy"]  # understands models' defaults and validators
+files = ["engine", "agent", "api", "desktop", "scripts"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+# Third-party packages without type information.
+module = ["webview.*", "fontTools.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["engine", "agent", "api", "desktop"]
+omit = [
+    "desktop/__main__.py",   # starts the GUI
+    "desktop/make_icon.py",  # one-off asset generator, checked by regenerating the icons
+]
+
+[tool.coverage.report]
+fail_under = 85
+skip_covered = true
+show_missing = true
+exclude_also = ["if __name__ == .__main__.:"]

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError } from "./api";
+import { ApiError, api } from "./api";
 import { Board, GROUP_COLORS } from "./components/Board";
 import { type LogEntry, MoveLog } from "./components/MoveLog";
 import { OnlineCard } from "./components/OnlineCard";
 import { TutorialCard } from "./components/TutorialCard";
 import { randomSeed, useDesktop } from "./desktop";
 import { useLiveFeed } from "./live";
-import { completedMove, type Mode, nextSquares, parseMove, type ParsedMove } from "./moves";
+import { completedMove, type Mode, nextSquares, type ParsedMove, parseMove } from "./moves";
 import { storage } from "./storage";
 import { accepts, LESSONS, type TutorialProgress } from "./tutorial/lessons";
 import type { Color, Correlations, GameState, LevelInfo, LevelName, LiveMessage, MoveResponse, Seat } from "./types";
@@ -345,10 +345,7 @@ export default function App() {
   const humanTurn = !!state && !isOver(state) && !busy && myTurn;
 
   // In the tutorial, only the moves the lesson asks for can be played.
-  const playable = useMemo(
-    () => (step ? legal.filter((m) => accepts(step, m.notation)) : legal),
-    [legal, step],
-  );
+  const playable = useMemo(() => (step ? legal.filter((m) => accepts(step, m.notation)) : legal), [legal, step]);
   const selectable = useMemo(
     () => (humanTurn ? nextSquares(mode, picked, playable) : new Set<string>()),
     [humanTurn, mode, picked, playable],
@@ -387,7 +384,7 @@ export default function App() {
   const last = log.length ? parseMove(log[log.length - 1].notation) : null;
   const counts = useMemo(() => {
     const result: Record<Mode, number> = { jump: 0, split: 0, merge: 0 };
-    playable.forEach((m) => result[m.type]++);
+    for (const m of playable) result[m.type]++;
     return result;
   }, [playable]);
 
@@ -415,7 +412,7 @@ export default function App() {
         {!tutorial && (
           <div className="header-actions">
             {lessonsDone.length === 0 && <span className="muted small">New here?</span>}
-            <button className="primary" onClick={() => void startLesson(0)} disabled={busy}>
+            <button type="button" className="primary" onClick={() => void startLesson(0)} disabled={busy}>
               Learn to play
             </button>
           </div>
@@ -477,6 +474,7 @@ export default function App() {
           <div className="modes" role="radiogroup" aria-label="Move type">
             {MODES.map((m) => (
               <button
+                type="button"
                 key={m.id}
                 role="radio"
                 aria-checked={mode === m.id}
@@ -524,6 +522,7 @@ export default function App() {
                     <div className="modes levels" role="radiogroup" aria-label="AI strength">
                       {levels.map((l) => (
                         <button
+                          type="button"
                           key={l.name}
                           role="radio"
                           aria-checked={level === l.name}
@@ -544,12 +543,14 @@ export default function App() {
             )}
             <div className="buttons">
               {!online && (
-                <button onClick={() => void aiMove()} disabled={busy || isOver(state)}>
+                <button type="button" onClick={() => void aiMove()} disabled={busy || isOver(state)}>
                   AI move now
                 </button>
               )}
-              <button onClick={() => setFlipped(!flipped)}>Flip board</button>
-              <button onClick={() => void newGame()} disabled={busy}>
+              <button type="button" onClick={() => setFlipped(!flipped)}>
+                Flip board
+              </button>
+              <button type="button" onClick={() => void newGame()} disabled={busy}>
                 {online ? "Leave & new game" : "New game"}
               </button>
             </div>
@@ -594,6 +595,7 @@ export default function App() {
               {state.entanglement_groups.length > 0 && (
                 <span className="swatches">
                   {state.entanglement_groups.map((_, i) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: one swatch per group, identified by its index
                     <span key={i} className="swatch" style={{ background: GROUP_COLORS[i % GROUP_COLORS.length] }} />
                   ))}
                 </span>
@@ -603,8 +605,8 @@ export default function App() {
             <li>A split piece can split again (50% → 25% + 25%), but no part can drop below 25%.</li>
             <li>Capturing or entering an uncertain square measures it. Flashing squares just collapsed.</li>
             <li>
-              Capture the enemy king to win. A red king square is in <em>check</em>: the opponent could try to
-              capture it next move.
+              Capture the enemy king to win. A red king square is in <em>check</em>: the opponent could try to capture
+              it next move.
             </li>
             <li>Draw after 50 moves each without a pawn move, capture or measurement, or when only kings remain.</li>
           </ul>

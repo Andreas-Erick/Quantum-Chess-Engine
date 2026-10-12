@@ -73,7 +73,7 @@ class Piece:
         return s.upper() if self.color == WHITE else s
 
     @classmethod
-    def from_symbol(cls, symbol: str) -> "Piece":
+    def from_symbol(cls, symbol: str) -> Piece:
         kind = PIECE_SYMBOLS.index(symbol.lower())
         return cls(WHITE if symbol.isupper() else BLACK, kind)
 
@@ -89,7 +89,7 @@ class Move:
         return square_name(self.source) + square_name(self.target) + promo
 
     @classmethod
-    def from_uci(cls, text: str) -> "Move":
+    def from_uci(cls, text: str) -> Move:
         if len(text) not in (4, 5):
             raise ValueError(f"invalid UCI move: {text!r}")
         promo = None
@@ -185,7 +185,7 @@ class ClassicalBoard:
             ]
         )
 
-    def copy(self) -> "ClassicalBoard":
+    def copy(self) -> ClassicalBoard:
         clone = ClassicalBoard.__new__(ClassicalBoard)
         clone.pieces = [list(p) for p in self.pieces]
         clone.mailbox = list(self.mailbox)
@@ -291,8 +291,7 @@ class ClassicalBoard:
 
     @staticmethod
     def _add_targets(moves: list[Move], src: int, targets: int) -> None:
-        for dst in iter_squares(targets):
-            moves.append(Move(src, dst))
+        moves.extend(Move(src, dst) for dst in iter_squares(targets))
 
     def _gen_pawn_moves(self, moves: list[Move], us: int, enemy: int, occupied: int) -> None:
         forward = 8 if us == WHITE else -8
@@ -397,10 +396,10 @@ class ClassicalBoard:
 
         if self.is_castling_shape(piece, move):
             back = rank_of(move.source)
-            if move.target > move.source:
-                self._put(square(5, back), self._remove(square(7, back)))
-            else:
-                self._put(square(3, back), self._remove(square(0, back)))
+            rook_from, rook_to = (7, 5) if move.target > move.source else (0, 3)
+            rook = self._remove(square(rook_from, back))
+            assert rook is not None, "castling rights guarantee the rook"
+            self._put(square(rook_to, back), rook)
 
         self.castling &= ~(CASTLING_MASK[move.source] | CASTLING_MASK[move.target])
         self.ep_square = None

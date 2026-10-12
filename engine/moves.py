@@ -12,9 +12,10 @@ Notation (as in Cantwell's Quantum Chess):
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Sequence
+from typing import Optional
 
 import cirq
 
@@ -40,16 +41,30 @@ class QuantumMove:
     promotion: Optional[int] = None
 
     @classmethod
-    def jump(cls, source: int, target: int, promotion: Optional[int] = None) -> "QuantumMove":
+    def jump(cls, source: int, target: int, promotion: Optional[int] = None) -> QuantumMove:
         return cls(MoveType.JUMP, source, target, promotion=promotion)
 
     @classmethod
-    def split(cls, source: int, target: int, target2: int) -> "QuantumMove":
+    def split(cls, source: int, target: int, target2: int) -> QuantumMove:
         return cls(MoveType.SPLIT, source, target, target2=target2)
 
     @classmethod
-    def merge(cls, source: int, source2: int, target: int) -> "QuantumMove":
+    def merge(cls, source: int, source2: int, target: int) -> QuantumMove:
         return cls(MoveType.MERGE, source, target, source2=source2)
+
+    @property
+    def split_targets(self) -> tuple[int, int]:
+        """A split's two targets. Raises ``ValueError`` for any other move."""
+        if self.move_type is not MoveType.SPLIT or self.target2 is None:
+            raise ValueError(f"a {self.move_type.value} move has no split targets")
+        return self.target, self.target2
+
+    @property
+    def merge_sources(self) -> tuple[int, int]:
+        """A merge's two sources. Raises ``ValueError`` for any other move."""
+        if self.move_type is not MoveType.MERGE or self.source2 is None:
+            raise ValueError(f"a {self.move_type.value} move has no merge sources")
+        return self.source, self.source2
 
     @property
     def squares(self) -> tuple[int, ...]:
@@ -59,13 +74,11 @@ class QuantumMove:
 
     def notation(self) -> str:
         if self.move_type is MoveType.SPLIT:
-            return (
-                f"{square_name(self.source)}^{square_name(self.target)}{square_name(self.target2)}"
-            )
+            t1, t2 = self.split_targets
+            return f"{square_name(self.source)}^{square_name(t1)}{square_name(t2)}"
         if self.move_type is MoveType.MERGE:
-            return (
-                f"{square_name(self.source)}{square_name(self.source2)}^{square_name(self.target)}"
-            )
+            s1, s2 = self.merge_sources
+            return f"{square_name(s1)}{square_name(s2)}^{square_name(self.target)}"
         promo = PIECE_SYMBOLS[self.promotion] if self.promotion is not None else ""
         return square_name(self.source) + square_name(self.target) + promo
 
@@ -73,7 +86,7 @@ class QuantumMove:
         return self.notation()
 
     @classmethod
-    def parse(cls, text: str) -> "QuantumMove":
+    def parse(cls, text: str) -> QuantumMove:
         text = text.strip()
         try:
             if "^" in text:
