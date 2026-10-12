@@ -12,6 +12,8 @@ interface OnlineCardProps {
   onCreate: (color: Color | "random") => void;
   /** Desktop only: join from an invite link. */
   onJoin: (link: string) => void;
+  /** Desktop only: stop accepting players from the network. */
+  onStopHosting: () => void;
 }
 
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
@@ -23,13 +25,25 @@ export function inviteLink(gameId: string, base?: string | null): string {
 
 const short = (hex: string) => `${hex.slice(0, 10)}…`;
 
-export function OnlineCard({ state, seat, connected, busy, desktop, onCreate, onJoin }: OnlineCardProps) {
+export function OnlineCard({ state, seat, connected, busy, desktop, onCreate, onJoin, onStopHosting }: OnlineCardProps) {
   const [color, setColor] = useState<Color | "random">("white");
   const [copied, setCopied] = useState(false);
   const [joinLink, setJoinLink] = useState("");
   const hosting = !!desktop?.ownPage;
   const back = desktop && !desktop.ownPage && (
     <button onClick={() => void desktop.api.home()}>Back to my games</button>
+  );
+  const hostingNote = hosting && desktop.lanUrl && (
+    <div className="hosting">
+      <p className="muted small">
+        Hosting at <code>{desktop.lanUrl}</code>. Anyone on this network can reach it until you stop.
+      </p>
+      <div className="buttons">
+        <button onClick={onStopHosting} disabled={busy}>
+          Stop hosting
+        </button>
+      </div>
+    </div>
   );
 
   if (!state.seats) {
@@ -45,7 +59,7 @@ export function OnlineCard({ state, seat, connected, busy, desktop, onCreate, on
           <>
             <p className="muted small">
               {hosting
-                ? "Host a game on your network and send your friend the link. They can join from their own Quantum Chess app or a browser."
+                ? "Host a game on your network and send your friend the link. They can join from their own Quantum Chess app or a browser. Only host on networks you trust, like your home Wi-Fi."
                 : "Start a game and send your friend the link. Each of you plays from your own device."}
             </p>
             <label className="row">
@@ -80,6 +94,7 @@ export function OnlineCard({ state, seat, connected, busy, desktop, onCreate, on
                 </button>
               </form>
             )}
+            {hostingNote}
           </>
         )}
       </section>
@@ -126,7 +141,7 @@ export function OnlineCard({ state, seat, connected, busy, desktop, onCreate, on
           {hosting ? (
             <p className="muted small">
               Your friend needs to be on the same network. If they can't connect, allow Quantum Chess through your
-              firewall.
+              firewall, on private networks only.
             </p>
           ) : (
             LOCAL_HOSTS.includes(window.location.hostname) && (
@@ -162,6 +177,7 @@ export function OnlineCard({ state, seat, connected, busy, desktop, onCreate, on
           )}
         </p>
       )}
+      {hostingNote}
       {back && <div className="buttons">{back}</div>}
     </section>
   );

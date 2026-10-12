@@ -27,6 +27,9 @@ LicenseFile=..\LICENSE
 OutputDir=..\installer
 OutputBaseFilename=QuantumChess-Setup-{#AppVersion}
 UninstallDisplayIcon={app}\QuantumChess.exe
+SetupIconFile=icon.ico
+; The app's data lives in the user's AppData (see [UninstallDelete]); that's intended.
+UsedUserAreasWarning=no
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -40,6 +43,11 @@ Source: "..\dist\QuantumChess\*"; DestDir: "{app}"; Flags: ignoreversion recurse
 [InstallDelete]
 ; Clear the previous version's bundled libraries, so an upgrade never mixes old and new files.
 Type: filesandordirs; Name: "{app}\_internal"
+
+[UninstallDelete]
+; What the app saved: browser storage (finished lessons), the seeds of joined games, the log.
+; Nothing in it is useful without the app, so uninstalling leaves nothing behind.
+Type: filesandordirs; Name: "{userappdata}\QuantumChess"
 
 [Icons]
 Name: "{autoprograms}\Quantum Chess"; Filename: "{app}\QuantumChess.exe"

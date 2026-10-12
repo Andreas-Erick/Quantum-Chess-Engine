@@ -60,12 +60,17 @@ pip install -r requirements-desktop.txt
 python -m desktop                          # the game in its own window, engine in-process
 python -m desktop --lan                    # start hosting on your network right away
 python -m desktop --server https://...     # open a hosted server instead of a local one
+pip install --require-hashes -r requirements-desktop.lock   # the exact versions releases use
 pyinstaller desktop/quantum_chess.spec     # build dist/QuantumChess yourself
 iscc /DAppVersion=1.2.3 desktop/installer.iss   # then the Windows installer (Inno Setup 6)
+python -m desktop.make_icon                # redraw the icons (needs pillow and fonttools)
 ```
 
 The window is the system web view (Edge WebView2 on Windows, WebKit on macOS), showing the same UI
 the server hosts. Pushing a `v*` tag builds both installers in CI and attaches them to a release.
+The release is signed (Windows) and signed and notarized (macOS) when the repository has the
+signing secrets listed at the top of [`desktop.yml`](.github/workflows/desktop.yml); without
+them it is built unsigned.
 
 </details>
 
@@ -77,7 +82,10 @@ the server hosts. Pushing a `v*` tag builds both installers in CI and attaches t
 1. The host clicks **Host a game** in the **Play a friend** card. Their app starts accepting
    players from the local network, and the invite link points at it
    (`http://192.168.1.20:52814/?join=…`). Windows may ask to allow Quantum Chess through the
-   firewall the first time.
+   firewall the first time: allow it on **private networks only**. Host only on networks you
+   trust, like your home Wi-Fi, and click **Stop hosting** when you're done (closing the app
+   stops it too). Other machines can only join and play your online games, not start games or
+   AI searches on your computer.
 2. The friend pastes the link into **Join** in their own app, or opens it in any browser.
 3. Moves appear on both screens instantly over a WebSocket, and each player can move only their
    own side. **Game ▸ My games** returns to your own games afterwards.
@@ -126,7 +134,7 @@ server rules out. Details in [`api/fairness.py`](api/fairness.py).
   host a game on the local network or join one. Measurement outcomes come from dice both players
   seed (commit–reveal), so a hosting player can't choose them, and the joiner can replay the
   finished game to check every outcome.
-- **Tested hard where things are random.** 223 Python tests and 17 UI tests: perft-verified move
+- **Tested hard where things are random.** 231 Python tests and 17 UI tests: perft-verified move
   generation, forced and statistical measurement outcomes, A→B→C entanglement chains, and
   random-play invariant checks. CI runs everything plus a Docker smoke test.
 
@@ -160,6 +168,26 @@ on it: ● is its probability if the hovered square is occupied, ○ if it is em
 **AI strength.** Choose Easy, Medium or Hard in the Game panel. Easy searches briefly and misses
 threats; Medium (the default) looks one move ahead; Hard thinks longer and deeper. The API takes
 the same names: `POST /ai_move {"game_id": ..., "level": "hard"}`, and `GET /levels` lists them.
+
+## Privacy and security
+
+- **No accounts, no tracking.** The app asks for no personal information, sends no analytics or
+  crash reports, and never contacts a server of ours. Its only network traffic is the game itself,
+  with a friend you host or join.
+- **What it stores.** Finished lessons, your chosen AI level and your seats in online games (the
+  web view's storage), the dice seeds of games you joined (`joined.json`), and a log. All of it
+  lives in `%APPDATA%\QuantumChess` (Windows) or `~/Library/Application Support/QuantumChess`
+  (macOS), and the Windows uninstaller removes it.
+- **Listening on the network is opt-in.** The engine listens on `127.0.0.1` only, until you
+  click **Host a game** (or start with `--lan`). **Stop hosting** closes the network listener,
+  which only lets other machines join, watch and play your online games.
+- **The window stays on known pages.** After you join, the host's page runs in your window, so
+  the app keeps the window to its own pages and the games you joined, and sends it back if a page
+  tries to go anywhere else. The host's page can't host, join or learn your local address.
+- **No special permissions.** No camera, microphone, location, notifications or file access; the
+  clipboard is written only when you click **Copy**. The installer needs no admin rights.
+- **Builds are reproducible.** Release builds and the Docker image install exact versions from
+  hash-checked lock files, and the workflows pin their actions to commits.
 
 ## How it works
 
@@ -244,9 +272,12 @@ subscribers, so both screens update instantly and a reconnecting client catches 
 history. The dice are seeded by both sides and verifiable afterwards (see *Play a friend* above).
 
 **The desktop app** runs the same FastAPI app in-process on `127.0.0.1`. **Host a game** starts a
-second listener for the same app on the local network. The page talks to the app through a small
-bridge (`window.pywebview.api`) that refuses hosting and joining on any page but the app's own,
-because a friend's page loaded in the same window gets the bridge too.
+second listener for the same app on the local network, which refuses `/init`, `/ai_move` and
+`/online/create` (`GuestsOnly`), so other machines can play the host's online games but not spend
+its CPU and memory. The page talks to the app through a small bridge (`window.pywebview.api`)
+that refuses hosting and joining on any page but the app's own, because a friend's page loaded
+in the same window gets the bridge too. Before each page load the app checks the address and
+sends the window home unless it is the app's own page or a game it joined.
 
 ## API
 
@@ -271,8 +302,9 @@ Online games' `GameState` carries `fairness`: the server's `commitment`, the joi
 `guest_seed`, and the `secret` once the game is over.
 
 Errors: `400` illegal move or bad FEN, `403` not your turn in an online game (or AI requested
-there), `404` unknown game, `409` game over or opponent not seated yet, `422` malformed
-payload. Every move response lists its measurements: what was asked, the prior probability, the
+there, or a host-only endpoint on a desktop app's network listener), `404` unknown game, `409`
+game over or opponent not seated yet, `422` malformed payload (including over-long ids, tokens,
+FENs or moves). Every move response lists its measurements: what was asked, the prior probability, the
 outcome, and every square that collapsed.
 
 </details>
@@ -329,8 +361,10 @@ agent/
   client.py         remote agent that plays using only the API
 desktop/
   app.py            native window, in-process server, hosting and joining, Game menu
+  make_icon.py      draws icon.png / .ico / .icns and ui/public/favicon.svg
   quantum_chess.spec  PyInstaller build for Windows and macOS
   installer.iss     Inno Setup script for the Windows installer
+  sign-windows.ps1, entitlements.plist   release signing (Windows) and hardened runtime (macOS)
 ui/src/
   App.tsx           game flow: local, AI, tutorial and online games
   components/       Board, MoveLog, TutorialCard, OnlineCard
@@ -350,13 +384,18 @@ tests/              classical, superposition, measurement, entanglement, rules, 
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                                   # 223 tests, ~12 s
+pytest -q                                   # 231 tests, ~15 s
 black --check . && flake8
 cd ui && npm ci && npm test && npm run build
 cd ui && npm run dev                        # UI with hot reload on :5173 (proxies to :8000)
 python -m desktop                           # the desktop app, from source
 python -m agent.arena --games 40 --a iterations=400 --b iterations=100   # agent strength match
 ```
+
+`requirements*.txt` give version ranges, and CI tests against the newest versions in them. The
+Docker image and the desktop releases install from `requirements.lock` and
+`requirements-desktop.lock` instead: exact versions with hashes, for every platform. Regenerate
+them after changing a requirements file, with the `uv pip compile` command in each lock's header.
 
 ## Limitations and next steps
 
@@ -365,14 +404,17 @@ python -m agent.arena --games 40 --a iterations=400 --b iterations=100   # agent
   games, equal iterations), and narrowing progressive widening from 2·√n to 0.7·√n added another
   83% (96 games). Medium beats Easy 92% and Hard beats Medium 74%.
 - En passant is not available in quantum play, and pawns cannot split.
-- Games are stored in memory; a restart clears them, including online games in progress. Redis
-  or a database would make the API stateless; the live feed would then need a pub/sub channel.
+- Games are stored in memory; a restart clears them, including online games in progress. The
+  server keeps the 500 most recently used (`QC_MAX_GAMES`). Redis or a database would make the
+  API stateless; the live feed would then need a pub/sub channel.
+- A public server lets anyone start AI searches (up to 60 s each). Deploy behind a rate limit if
+  that matters; the desktop app's network listener refuses them outright.
 - There are no accounts: whoever holds a seat token plays that side, and anyone with the game
   link can watch.
 - Hosting from the desktop app reaches only the local network. Over the internet it needs a VPN
   like Tailscale or a tunnel, or a deployed server; there is no built-in NAT traversal.
-- The desktop builds are unsigned, so Windows SmartScreen and macOS Gatekeeper warn on first
-  launch.
+- Until signing certificates are added to the repository, the desktop builds are unsigned, so
+  Windows SmartScreen and macOS Gatekeeper warn on first launch.
 
 ## Acknowledgements
 
