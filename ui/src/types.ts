@@ -47,6 +47,8 @@ export interface GameState {
   pieces: PieceInfo[];
   entanglement_groups: string[][];
   history: HistoryEntry[];
+  /** Online games only: which colours a player has claimed. Null for local games. */
+  seats?: Record<Color, boolean> | null;
 }
 
 export interface MoveResponse {
@@ -66,6 +68,20 @@ export interface SearchInfo {
 export interface AIMoveResponse extends MoveResponse {
   search: SearchInfo;
 }
+
+/** A claimed seat in an online game. The token is what lets this browser move for `color`. */
+export interface Seat {
+  color: Color;
+  token: string;
+}
+
+export interface SeatResponse extends Seat {
+  game_id: string;
+  state: GameState;
+}
+
+/** Messages on the /ws live feed. */
+export type LiveMessage = ({ type: "move" } & MoveResponse) | { type: "state"; state: GameState };
 
 export interface Correlations {
   square: string;

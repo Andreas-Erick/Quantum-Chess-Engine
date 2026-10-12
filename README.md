@@ -29,7 +29,8 @@ docker compose up --build
 ```
 
 Open <http://localhost:8000> and play white against the AI, or open
-<http://localhost:8000/docs> for the interactive API.
+<http://localhost:8000/docs> for the interactive API. New to quantum chess? Click **Learn to
+play** for seven short interactive lessons.
 
 <details>
 <summary>Without Docker</summary>
@@ -40,6 +41,41 @@ pip install -r requirements.txt
 (cd ui && npm ci && npm run build)                      # optional: the UI served at /
 uvicorn api.server:app
 ```
+
+</details>
+
+<details>
+<summary>Desktop app</summary>
+
+Download the Windows or macOS build from the
+[releases page](https://github.com/Andreas-Erick/Quantum-Chess/releases), or run it from source:
+
+```bash
+pip install -r requirements-desktop.txt
+(cd ui && npm ci && npm run build)
+python -m desktop                          # the game in its own window, engine in-process
+python -m desktop --lan                    # let a friend on your network join online games
+python -m desktop --server https://...     # open a hosted server to play friends anywhere
+pyinstaller desktop/quantum_chess.spec     # build dist/QuantumChess yourself
+```
+
+The window is the system web view (Edge WebView2 on Windows, WebKit on macOS), showing the same UI
+the server hosts. Pushing a `v*` tag builds both platforms in CI and attaches them to a release.
+
+</details>
+
+<details>
+<summary>Play a friend online</summary>
+
+In the **Play a friend online** card, choose your colour and click **Create invite link**, then send
+the link to your friend. Opening it takes the other seat. Moves appear on both screens instantly
+over a WebSocket, and each browser can move only its own side. Spectators can open the
+`?game=<id>` link to watch.
+
+Your friend has to be able to reach the server. On the same network, use `python -m desktop --lan`
+(or `uvicorn api.server:app --host 0.0.0.0`). Over the internet, deploy the Docker image to any
+container host (Render, Fly.io, a VPS) and share links from there. Put it behind HTTPS so the live
+feed runs over `wss://`.
 
 </details>
 
@@ -59,7 +95,7 @@ uvicorn api.server:app
   outcomes in proportion to their true probabilities. Progressive widening keeps the search
   focused despite hundreds of possible splits per position. Improvements are measured, not
   guessed: an arena plays agent versions against each other.
-- **Tested hard where things are random.** 175 Python tests and 8 UI tests: perft-verified move
+- **Tested hard where things are random.** 208 Python tests and 13 UI tests: perft-verified move
   generation, forced and statistical measurement outcomes, A→B→C entanglement chains, and
   random-play invariant checks. CI runs everything plus a Docker smoke test.
 
@@ -161,6 +197,17 @@ entanglement groups share ring colours, collapsed squares flash, and the move lo
 measurement (`d2 occupied? (50%) → no · 6 squares collapsed`). A `?game=<id>` link opens a
 specific game.
 
+The **tutorial** runs seven lessons (capturing the king, check, split, merge, splitting again,
+measurement, entanglement) on real engine games. Each lesson is data in
+`ui/src/tutorial/lessons.json`: a position, the moves the player may make, the opponent's scripted
+reply and an explanation. Only the moves a step asks for are clickable. `tests/test_tutorial.py`
+replays every lesson on the engine and checks what the text claims, for example that the queen
+ends up 50% on h5 and entangled with the knight.
+
+**Online games** give each player a secret seat token; `/do_move` accepts a move only with the
+token of the side to move. Every move is pushed to `/ws` subscribers, so both screens update
+instantly and a reconnecting client catches up from the full history.
+
 ## API
 
 <details>
@@ -174,9 +221,13 @@ specific game.
 | `GET` | `/legal_moves?game_id=` | All legal moves in notation |
 | `GET` | `/correlations?game_id=&square=` | Entangled squares' probabilities given that square is occupied / empty |
 | `POST` | `/ai_move` | MCTS move (`{game_id, iterations?, rollout_depth?, time_limit?, seed?}`) |
+| `POST` | `/online/create` | Online game (`{color: white\|black\|random}`) → `{game_id, color, token, state}` |
+| `POST` | `/online/join` | Take the open seat (`{game_id}`) → `{game_id, color, token, state}`; `409` if full |
+| `WS` | `/ws?game_id=` | Live feed: `{type: "state", state}` on connect and joins, `{type: "move", ...}` per move |
 | `GET` | `/health` | Liveness probe |
 
-Errors: `400` illegal move or bad FEN, `404` unknown game, `409` game over, `422` malformed
+Errors: `400` illegal move or bad FEN, `403` not your turn in an online game (or AI requested
+there), `404` unknown game, `409` game over, `422` malformed
 payload. Every move response lists its measurements: what was asked, the prior probability, the
 outcome, and every square that collapsed.
 
@@ -225,16 +276,22 @@ engine/
   board.py          QuantumBoard: ties the classical and quantum layers together
 api/
   schemas.py        Pydantic models: the JSON contract
-  server.py         FastAPI endpoints, in-memory game store, serves the UI
+  server.py         FastAPI endpoints, online seats, /ws live feed, serves the UI
 agent/
   heuristics.py     probability-weighted evaluation with a one-capture threat term
   mcts.py           open-loop MCTS with progressive widening and root lookahead
   arena.py          agent-vs-agent matches for measuring strength
   client.py         remote agent that plays using only the API
+desktop/
+  app.py            native window (pywebview) around an in-process server
+  quantum_chess.spec  PyInstaller build for Windows and macOS
 ui/src/
-  components/       Board (probabilities, rings, conditional overlays), MoveLog
+  components/       Board, MoveLog, TutorialCard, OnlineCard
+  tutorial/         lessons.json and its types
+  live.ts           live-feed WebSocket with reconnects
   moves.ts          clicks -> move notation, driven by the legal-move list
-tests/              classical, superposition, measurement, entanglement, rules, agent, arena, api
+tests/              classical, superposition, measurement, entanglement, rules, agent, arena, api,
+                    online, tutorial, desktop
 ```
 
 </details>
@@ -243,7 +300,7 @@ tests/              classical, superposition, measurement, entanglement, rules, 
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                                   # 175 tests, ~10 s
+pytest -q                                   # 208 tests, ~10 s
 black --check . && flake8
 cd ui && npm ci && npm test && npm run build
 cd ui && npm run dev                        # UI with hot reload on :5173 (proxies to :8000)
@@ -257,8 +314,12 @@ python -m agent.arena --games 40 --a iterations=400 --b iterations=100   # agent
   games, equal iterations), and narrowing progressive widening from 2·√n to 0.7·√n added another
   83% (96 games). Medium beats Easy 92% and Hard beats Medium 74%.
 - En passant is not available in quantum play, and pawns cannot split.
-- Games are stored in memory; a restart clears them. Redis or a database would make the API
-  stateless.
+- Games are stored in memory; a restart clears them, including online games in progress. Redis
+  or a database would make the API stateless; the live feed would then need a pub/sub channel.
+- There are no accounts: whoever holds a seat token plays that side, and anyone with the game
+  link can watch.
+- The desktop builds are unsigned, so Windows SmartScreen and macOS Gatekeeper warn on first
+  launch.
 
 ## Acknowledgements
 
