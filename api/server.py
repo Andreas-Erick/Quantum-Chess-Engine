@@ -10,6 +10,7 @@ import os
 import secrets
 import threading
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -52,6 +53,8 @@ KIND_NAMES = ("pawn", "knight", "bishop", "rook", "queen", "king")
 
 # The built visualizer (``npm run build`` in ui/). Served at / when present.
 UI_DIR = Path(os.environ.get("QC_UI_DIR", Path(__file__).resolve().parent.parent / "ui" / "dist"))
+# Games kept in memory at once; the least recently used is forgotten beyond that.
+MAX_GAMES = int(os.environ.get("QC_MAX_GAMES", 500))
 
 
 @dataclass
@@ -108,11 +111,15 @@ class Game:
 
 
 class GameStore:
-    """In-memory game registry. Swap for Redis or a database to scale horizontally."""
+    """In-memory game registry. Swap for Redis or a database to scale horizontally.
 
-    def __init__(self) -> None:
-        self._games: dict[str, Game] = {}
+    Holds at most ``max_games``; creating one more forgets the game least recently used, so
+    nobody can exhaust the server's memory by creating games."""
+
+    def __init__(self, max_games: int = MAX_GAMES) -> None:
+        self._games: OrderedDict[str, Game] = OrderedDict()
         self._lock = threading.Lock()
+        self.max_games = max_games
 
     def create(self, board: QuantumBoard, online: bool = False) -> str:
         game_id = uuid.uuid4().hex[:12]
@@ -122,13 +129,19 @@ class GameStore:
             game.secret = new_secret()
         with self._lock:
             self._games[game_id] = game
+            while len(self._games) > self.max_games:
+                self._games.popitem(last=False)
         return game_id
 
     def find(self, game_id: str) -> Optional[Game]:
-        return self._games.get(game_id)
+        with self._lock:
+            game = self._games.get(game_id)
+            if game is not None:
+                self._games.move_to_end(game_id)
+            return game
 
     def get(self, game_id: str) -> Game:
-        game = self._games.get(game_id)
+        game = self.find(game_id)
         if game is None:
             raise HTTPException(status_code=404, detail=f"unknown game {game_id!r}")
         return game

@@ -12,6 +12,9 @@ invite link points there) and the other *joins* by pasting the link. Joining hap
 Python code rather than in the page: the joiner's share of the dice (see api/fairness.py) is
 generated and kept here, where the host can't see or replace it, so the joiner can verify the
 finished game from the Game menu.
+
+Hosting opens the app to the network, so it is opt-in, can be stopped, and lets other machines
+only join and play the host's online games (see ``GuestsOnly``).
 """
 
 from __future__ import annotations
@@ -29,6 +32,10 @@ from typing import Any, Optional
 from urllib.parse import parse_qs, urlsplit
 
 APP_NAME = "Quantum Chess"
+
+# Endpoints the network listener refuses: each starts a game or an AI search on the host's
+# computer, which only the host should be able to do.
+HOST_ONLY_PATHS = frozenset({"/init", "/ai_move", "/online/create"})
 
 
 def bundle_dir() -> Path:
@@ -78,8 +85,12 @@ def start_server(
 
     if app is None:
         app = create_app(ui_dir=ui_dir) if ui_dir is not None else create_app()
-    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
+    config = uvicorn.Config(
+        app, host=host, port=port, log_level="warning", timeout_graceful_shutdown=2
+    )
+    server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, name=f"server-{host}:{port}", daemon=True)
+    server.thread = thread  # for stop_server
     thread.start()
     deadline = time.monotonic() + timeout
     while not server.started:
@@ -87,6 +98,31 @@ def start_server(
             raise RuntimeError(f"the engine did not start on {host}:{port}")
         time.sleep(0.05)
     return server
+
+
+def stop_server(server: Any, timeout: float = 5.0) -> None:
+    """Stop a server from ``start_server``; returns once it has let go of its port."""
+    server.should_exit = True
+    server.thread.join(timeout)
+
+
+class GuestsOnly:
+    """The app as other machines see it while this one hosts: they can join, watch and play
+    the host's online games, but not start games or AI searches here (``HOST_ONLY_PATHS``).
+    Anyone on the network can reach the listener, and those would cost the host memory and
+    minutes of CPU per request."""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] == "http" and scope["path"].rstrip("/") in HOST_ONLY_PATHS:
+            from starlette.responses import JSONResponse
+
+            detail = "Only the host can start games here. Ask them for an invite link."
+            await JSONResponse({"detail": detail}, status_code=403)(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
 
 
 def origin_of(url: str) -> str:
@@ -152,15 +188,27 @@ def join_game(link: str, joined: JoinedGames) -> str:
 class Desktop:
     """What the page can ask of the app, as ``window.pywebview.api``. Every page in the window
     gets this bridge, including a host's page after joining, so anything that acts on this
-    machine (hosting, joining) is refused unless the page is this app's own."""
+    machine (hosting, joining) is refused unless the page is this app's own.
 
-    def __init__(self, app: Any, local_url: Optional[str], joined: JoinedGames) -> None:
+    The window has no address bar, so it only shows pages the app opened itself: its own,
+    ``start_url`` (with --server) and the games it joined. See ``_check_page``."""
+
+    def __init__(
+        self,
+        app: Any,
+        local_url: Optional[str],
+        joined: JoinedGames,
+        start_url: Optional[str] = None,
+    ) -> None:
         self._app = app
         self._local_url = local_url
+        self._home_url = local_url or start_url
+        self._lan_server: Any = None
         self._lan_url: Optional[str] = None
         self._joined = joined
         self._window: Any = None
         self._lock = threading.Lock()
+        self._allowed = {origin_of(url) for url in (local_url, start_url) if url}
 
     def _on_own_page(self) -> bool:
         current = self._window.get_current_url() if self._window else None
@@ -172,14 +220,45 @@ class Desktop:
         with self._lock:
             if self._lan_url is None:
                 port = free_port("0.0.0.0")
-                start_server("0.0.0.0", port, self._app)
+                self._lan_server = start_server("0.0.0.0", port, GuestsOnly(self._app))
                 self._lan_url = f"http://{lan_address()}:{port}"
+                self._allowed.add(origin_of(self._lan_url))
             return self._lan_url
+
+    def _stop_hosting(self) -> None:
+        with self._lock:
+            if self._lan_server is not None:
+                stop_server(self._lan_server)
+                self._allowed.discard(origin_of(self._lan_url))
+                self._lan_server = self._lan_url = None
+
+    def _check_page(self) -> None:
+        """Send the window home if a page took it somewhere the app didn't open. A host's
+        page runs in this window after joining and could otherwise show a look-alike site
+        (a fake sign-in, say) with no address bar to give it away."""
+        url = self._window.get_current_url() if self._window else None
+        if not url or url == "about:blank" or origin_of(url) in self._allowed:
+            return
+        if self._home_url:
+            self._window.load_url(self._home_url)
+        self._window.create_confirmation_dialog(
+            "Page blocked",
+            f"A page tried to open {origin_of(url)} in this window. Quantum Chess only shows "
+            "its own games and the games you join, so it went back to your games.",
+        )
+
+    def _before_load(self) -> None:
+        # Fires on the GUI thread before the page gets the bridge. Check from another thread:
+        # the window's methods hand their work to the GUI thread and wait for it.
+        threading.Thread(target=self._check_page, name="check-page", daemon=True).start()
 
     # --- Exposed to the page ---------------------------------------------------------
 
     def info(self) -> dict:
-        return {"local_url": self._local_url, "lan_url": self._lan_url}
+        """Whether this is the app's own page, and where it hosts. A host's page learns no
+        more than that it isn't the app's own."""
+        own = self._on_own_page()
+        return {"own_page": own, "lan_url": self._lan_url if own else None}
 
     def host(self) -> str:
         """Start accepting players from the local network; returns the address to invite to."""
@@ -187,14 +266,22 @@ class Desktop:
             raise PermissionError("only the app's own page can start hosting")
         return self._start_hosting()
 
+    def stop_hosting(self) -> None:
+        """Stop accepting players from the network. Games in progress there are cut off."""
+        if not self._on_own_page():
+            raise PermissionError("only the app's own page can stop hosting")
+        self._stop_hosting()
+
     def join(self, link: str) -> None:
         if not self._on_own_page():
             raise PermissionError("only the app's own page can join games")
-        self._window.load_url(join_game(link, self._joined))
+        url = join_game(link, self._joined)
+        self._allowed.add(origin_of(url))
+        self._window.load_url(url)
 
     def home(self) -> None:
-        if self._local_url:
-            self._window.load_url(self._local_url)
+        if self._home_url:
+            self._window.load_url(self._home_url)
 
     # --- Menu ------------------------------------------------------------------------
 
@@ -247,8 +334,8 @@ def main(argv: Optional[list[str]] = None) -> None:
     args = parse_args(argv)
     joined = JoinedGames(data_dir() / "joined.json")
     if args.server:
-        desktop = Desktop(None, None, joined)
         url = args.server
+        desktop = Desktop(None, None, joined, start_url=url)
     else:
         from api.server import create_app
 
@@ -278,6 +365,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         min_size=(720, 640),
         background_color="#f5f4f0",
     )
+    desktop._window.events.before_load += desktop._before_load
     menu = [
         Menu(
             "Game",
@@ -294,6 +382,9 @@ def main(argv: Optional[list[str]] = None) -> None:
         storage_path=str(data_dir() / "webview"),
         debug=args.debug,
         menu=menu,
+        icon=str(
+            bundle_dir() / "desktop" / ("icon.ico" if sys.platform == "win32" else "icon.png")
+        ),
     )
 
 

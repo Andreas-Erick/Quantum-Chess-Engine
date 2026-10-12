@@ -5,7 +5,7 @@
 #     pyinstaller desktop/quantum_chess.spec --noconfirm
 #
 # Output: dist/QuantumChess/ (a folder with the QuantumChess executable; on macOS also
-# dist/QuantumChess.app).
+# dist/QuantumChess.app). The icons come from desktop/make_icon.py.
 
 import sys
 from pathlib import Path
@@ -13,6 +13,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 ROOT = Path(SPECPATH).parent  # noqa: F821 (SPECPATH is defined by PyInstaller)
+ICON = str(ROOT / "desktop" / ("icon.icns" if sys.platform == "darwin" else "icon.ico"))
 
 if not (ROOT / "ui" / "dist" / "index.html").is_file():
     raise SystemExit("Build the UI first: cd ui && npm ci && npm run build")
@@ -27,7 +28,12 @@ hidden = (
 a = Analysis(  # noqa: F821
     [str(ROOT / "desktop" / "__main__.py")],
     pathex=[str(ROOT)],
-    datas=[(str(ROOT / "ui" / "dist"), "ui/dist")] + collect_data_files("cirq"),
+    datas=[
+        (str(ROOT / "ui" / "dist"), "ui/dist"),
+        (str(ROOT / "desktop" / "icon.ico"), "desktop"),  # window icons (see desktop/app.py)
+        (str(ROOT / "desktop" / "icon.png"), "desktop"),
+    ]
+    + collect_data_files("cirq"),
     hiddenimports=hidden,
     excludes=["matplotlib.tests", "pandas.tests", "scipy.tests", "numpy.tests", "tkinter"],
 )
@@ -39,6 +45,7 @@ exe = EXE(  # noqa: F821
     exclude_binaries=True,
     name="QuantumChess",
     console=False,
+    icon=ICON,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="QuantumChess")  # noqa: F821
 
@@ -46,6 +53,7 @@ if sys.platform == "darwin":
     app = BUNDLE(  # noqa: F821
         coll,
         name="QuantumChess.app",
+        icon=ICON,
         bundle_identifier="io.github.andreas-erick.quantum-chess",
         info_plist={"NSHighResolutionCapable": True},
     )

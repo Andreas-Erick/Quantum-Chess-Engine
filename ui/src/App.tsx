@@ -561,6 +561,12 @@ export default function App() {
             desktop={desktop}
             onCreate={createOnline}
             onJoin={(link) => void run(async () => desktop?.api.join(link))}
+            onStopHosting={() =>
+              void run(async () => {
+                await desktop?.api.stop_hosting();
+                setLanUrl(null);
+              })
+            }
           />
         )}
 
