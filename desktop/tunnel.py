@@ -20,8 +20,9 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import IO, Any, Optional, Sequence
+from typing import IO, Any, Optional
 
 PUBLIC_URL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 START_TIMEOUT = 45.0  # seconds; a quick tunnel usually takes 5 to 15
@@ -129,13 +130,14 @@ def _close_with_this_process(process: subprocess.Popen) -> Any:
         and kernel32.SetInformationJobObject(
             job, extended_limit_information, ctypes.byref(info), ctypes.sizeof(info)
         )
-        and kernel32.AssignProcessToJobObject(job, int(process._handle))
+        # Popen's process handle: private, but the only way to it on Windows.
+        and kernel32.AssignProcessToJobObject(job, int(process._handle))  # type: ignore[attr-defined]
     ):
         raise TunnelError("Could not tie the internet link to the app, so it wasn't opened.")
     return job
 
 
-def _read_lines(stream: IO[str], lines: "queue.Queue[str]") -> None:
+def _read_lines(stream: IO[str], lines: queue.Queue[str]) -> None:
     # Keep reading after the address shows up: a full pipe would stall cloudflared.
     for line in stream:
         lines.put(line)
@@ -174,7 +176,7 @@ class Tunnel:
             self.stop()
             raise
 
-        lines: "queue.Queue[str]" = queue.Queue()
+        lines: queue.Queue[str] = queue.Queue()
         assert self._process.stderr is not None
         threading.Thread(
             target=_read_lines, args=(self._process.stderr, lines), name="tunnel-log", daemon=True

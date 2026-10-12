@@ -27,6 +27,7 @@ export function MoveLog({ entries }: { entries: LogEntry[] }) {
   const list = useRef<HTMLOListElement>(null);
   // Keep the newest move in view by scrolling the list itself, not the page. The block body
   // matters: an effect must not return anything but a cleanup function.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll whenever a move is added
   useEffect(() => {
     const el = list.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -40,7 +41,7 @@ export function MoveLog({ entries }: { entries: LogEntry[] }) {
       {entries.map((e) => (
         <li key={e.ply} className={e.executed ? "" : "failed"}>
           <div className="log-head">
-            <span className={`dot ${e.color}`} aria-label={e.color} />
+            <span className={`dot ${e.color}`} role="img" aria-label={e.color} />
             <code>{e.notation}</code>
             {e.captured && <span className="tag capture">×{e.captured}</span>}
             {!e.executed && <span className="tag fail">failed</span>}
@@ -48,6 +49,7 @@ export function MoveLog({ entries }: { entries: LogEntry[] }) {
           </div>
           {e.measurements
             ? e.measurements.map((m, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: a move's measurements never change or reorder
                 <div key={i} className="measure">
                   ⚄ {describe(m)}
                 </div>

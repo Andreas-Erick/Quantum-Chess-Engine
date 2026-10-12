@@ -308,9 +308,9 @@ docs/               this guide, the API reference, README screenshots
 
 ### An AI level or AI change
 
-Add a `Level` to `LEVELS` in `agent/levels.py`, and its name to `LevelName` in both
-`api/schemas.py` and `ui/src/types.ts`. The UI's level picker and `agent.client --level` then list
-it from `/levels`. Measure any AI change with the arena before keeping it:
+Add a `Level` to `LEVELS` and its name to `LevelName`, both in `agent/levels.py` (the API's
+schemas import it), and to `LevelName` in `ui/src/types.ts`. `tests/test_contract.py` fails if
+they disagree. The UI's level picker and `agent.client --level` then list it from `/levels`. Measure any AI change with the arena before keeping it:
 
 ```bash
 python -m agent.arena --games 40 --a iterations=400 --b iterations=100

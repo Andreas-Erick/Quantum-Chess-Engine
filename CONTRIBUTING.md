@@ -30,14 +30,25 @@ python -m agent.arena --games 40 --a iterations=400 --b iterations=100   # AI st
 
 ## Checks
 
-CI runs these on every pull request, and they must pass before merging:
+CI runs these on every pull request, on Python 3.10, 3.12, 3.13 and 3.14, and they must pass
+before merging:
 
 ```bash
-pytest -q                                   # Python tests
-black --check . && flake8                   # formatting and lint
-cd ui && npx tsc --noEmit && npm test       # UI types and tests
+ruff check . && ruff format --check .       # lint and formatting (ruff format --write fixes it)
+mypy                                        # type check (settings in pyproject.toml)
+pytest -q --cov                             # tests, and coverage of at least 85%
+cd ui && npm run lint && npm test && npm run build   # Biome lint + format, tests, types, build
 ```
 
+Run them automatically before each commit with [pre-commit](https://pre-commit.com/). It uses
+the same tools from your environment, so activate the virtual environment first:
+
+```bash
+pre-commit install                          # once
+pre-commit run --all-files                  # any time
+```
+
+`ruff check --fix`, `ruff format` and `npm run format` (in `ui/`) fix most findings themselves.
 Pull requests that change the app also build the Windows and macOS installers.
 
 ## Conventions
@@ -52,8 +63,11 @@ Pull requests that change the app also build the Windows and macOS installers.
   both together. Give every new string field a length limit.
 - **Comments explain why**, not what: the reason for a limit, the attack a check prevents, the
   invariant a function relies on. Docstrings say what a function promises.
-- **Style**: Python is formatted by black (100 columns). TypeScript follows the existing style
-  (double quotes, semicolons, 2-space indents). `.editorconfig` sets the basics for most editors.
+- **Style** is automatic: Ruff formats Python (100 columns) and Biome formats TypeScript and CSS
+  (120 columns, double quotes, semicolons). `.editorconfig` sets the basics for other files.
+- **Types**: Python code is type-checked by mypy and the UI by TypeScript. When a value can be
+  missing only in some cases (a move's second target, say), give it an accessor that states the
+  rule, like `QuantumMove.split_targets`, rather than silencing the checker.
 - **Commit messages**: an imperative subject line ("Add …", "Fix …") of at most about 70
   characters, then a body that explains what changed and why, wrapped at 72.
 - **Dependencies**: `requirements*.txt` give version ranges, and CI tests the newest versions in

@@ -8,14 +8,18 @@ Each level is a set of :class:`~agent.mcts.MCTSAgent` options. Measured in the a
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Literal, Optional
 
 from agent.mcts import MCTSAgent
+
+# The levels' names, which the API contract and ui/src/types.ts list too
+# (tests/test_contract.py checks they match).
+LevelName = Literal["easy", "medium", "hard"]
 
 
 @dataclass(frozen=True)
 class Level:
-    name: str
+    name: LevelName
     label: str
     description: str
     options: dict = field(default_factory=dict)
@@ -24,7 +28,7 @@ class Level:
         return MCTSAgent(seed=seed, **self.options)
 
 
-LEVELS: dict[str, Level] = {
+LEVELS: dict[LevelName, Level] = {
     level.name: level
     for level in (
         Level(
@@ -48,4 +52,4 @@ LEVELS: dict[str, Level] = {
     )
 }
 
-DEFAULT_LEVEL = "medium"
+DEFAULT_LEVEL: LevelName = "medium"

@@ -79,7 +79,13 @@ describe("tutorial", () => {
           executed: true,
           captured: "k",
           measurements: [],
-          state: { ...base, game_id: "lesson", turn: "black", winner: "white", history: [{ notation: "a1a8", executed: true, outcomes: [] }] },
+          state: {
+            ...base,
+            game_id: "lesson",
+            turn: "black",
+            winner: "white",
+            history: [{ notation: "a1a8", executed: true, outcomes: [] }],
+          },
         };
     });
     await renderApp();
@@ -120,7 +126,8 @@ describe("online play", () => {
       if (url.startsWith("/levels")) return [];
       if (url.startsWith("/legal_moves")) return { moves: ["e2e4"] };
       if (url.startsWith("/online/create")) return { game_id: "g1", color: "white", token: "secret", state: online };
-      if (url.startsWith("/do_move")) return { move: "e2e4", executed: true, captured: null, measurements: [], state: afterMove };
+      if (url.startsWith("/do_move"))
+        return { move: "e2e4", executed: true, captured: null, measurements: [], state: afterMove };
     });
     await renderApp();
 
@@ -155,7 +162,11 @@ describe("online play", () => {
       executed: true,
       captured: null,
       measurements: [],
-      state: { ...afterMove, turn: "white", history: [...afterMove.history, { notation: "e7e5", executed: true, outcomes: [] }] },
+      state: {
+        ...afterMove,
+        turn: "white",
+        history: [...afterMove.history, { notation: "e7e5", executed: true, outcomes: [] }],
+      },
     });
     const logged = screen.getAllByText(/^e[27]e[45]$/).map((el) => el.textContent);
     expect(logged).toEqual(["e2e4", "e7e5"]);
@@ -187,7 +198,8 @@ describe("online play", () => {
   it("watches when both seats are taken", async () => {
     window.history.replaceState(null, "", "/?join=g3");
     serve((url) => {
-      if (url.startsWith("/online/join")) return new Response(JSON.stringify({ detail: "both seats are taken" }), { status: 409 });
+      if (url.startsWith("/online/join"))
+        return new Response(JSON.stringify({ detail: "both seats are taken" }), { status: 409 });
       if (url.startsWith("/state")) return { ...base, game_id: "g3", seats: { white: true, black: true } };
       if (url.startsWith("/levels")) return [];
       if (url.startsWith("/legal_moves")) return { moves: ["e2e4"] };

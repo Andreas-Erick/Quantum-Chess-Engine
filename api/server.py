@@ -6,6 +6,7 @@ Run locally with ``uvicorn api.server:app --reload``; interactive docs are at ``
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import secrets
 import threading
@@ -13,7 +14,7 @@ import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -22,18 +23,20 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from agent.levels import DEFAULT_LEVEL, LEVELS
-from api import __version__
 from agent.mcts import MCTSAgent, SearchResult
+from api import __version__
 from api.fairness import SeededDice, commitment, new_secret
 from api.schemas import (
     AIMoveRequest,
     AIMoveResponse,
+    Color,
     CorrelationsResponse,
     FairnessInfo,
     GameState,
     HistoryEntry,
     InitRequest,
     JoinRequest,
+    KindName,
     LegalMovesResponse,
     LevelInfo,
     MeasurementInfo,
@@ -50,7 +53,7 @@ from engine.board import IllegalMoveError, MoveResult, QuantumBoard
 from engine.classical import STARTING_FEN
 from engine.measurement import PathMeasurement
 
-KIND_NAMES = ("pawn", "knight", "bishop", "rook", "queen", "king")
+KIND_NAMES: tuple[KindName, ...] = ("pawn", "knight", "bishop", "rook", "queen", "king")
 
 # The built visualizer (``npm run build`` in ui/). Served at / when present.
 UI_DIR = Path(os.environ.get("QC_UI_DIR", Path(__file__).resolve().parent.parent / "ui" / "dist"))
@@ -68,14 +71,14 @@ class Game:
     board: QuantumBoard
     lock: threading.Lock = field(default_factory=threading.Lock)
     # Online games only: colour -> seat token, or None while the seat is open.
-    seats: Optional[dict[str, Optional[str]]] = None
+    seats: Optional[dict[Color, Optional[str]]] = None
     # Online games only: the server's share of the dice, and the joiner's once they join.
     secret: Optional[str] = None
     guest_seed: Optional[str] = None
     # Live feeds (/ws): each is a queue owned by an event loop. Guarded by ``lock``.
     subscribers: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = field(default_factory=list)
 
-    def seat_info(self) -> Optional[dict[str, bool]]:
+    def seat_info(self) -> Optional[dict[Color, bool]]:
         if self.seats is None:
             return None
         return {color: token is not None for color, token in self.seats.items()}
@@ -99,10 +102,9 @@ class Game:
         """Push a message to every live feed. Call with ``lock`` held, so feeds see moves in
         order. Safe from worker threads: delivery is scheduled on each feed's own loop."""
         for loop, queue in self.subscribers:
-            try:
+            # RuntimeError: the loop has closed, and the feed is going away.
+            with contextlib.suppress(RuntimeError):
                 loop.call_soon_threadsafe(queue.put_nowait, message)
-            except RuntimeError:  # the loop has closed; the feed is going away
-                pass
 
     def check_turn(self, token: Optional[str]) -> None:
         """In an online game, only the player holding the seat of the side to move may move."""
@@ -162,7 +164,7 @@ def is_guest(connection: Request | WebSocket) -> bool:
 
 
 def serialize_state(
-    game_id: str, board: QuantumBoard, seats: Optional[dict[str, bool]] = None
+    game_id: str, board: QuantumBoard, seats: Optional[dict[Color, bool]] = None
 ) -> GameState:
     pieces = [
         PieceInfo(
@@ -197,23 +199,27 @@ def serialize_state(
 def serialize_result(game_id: str, game: Game, result: MoveResult) -> dict:
     measurements = []
     for m in result.measurements:
-        is_path = isinstance(m, PathMeasurement)
+        kind: Literal["path", "square"]
+        if isinstance(m, PathMeasurement):
+            kind, squares, outcome = "path", m.path, m.clear
+        else:
+            kind, squares, outcome = "square", (m.square,), m.occupied
         measurements.append(
             MeasurementInfo(
-                kind="path" if is_path else "square",
-                squares=[square_name(s) for s in (m.path if is_path else (m.square,))],
+                kind=kind,
+                squares=[square_name(s) for s in squares],
                 probability=m.probability,
-                outcome=m.clear if is_path else m.occupied,
+                outcome=outcome,
                 collapsed={square_name(s): v for s, v in m.collapsed.items()},
             )
         )
-    return dict(
-        move=result.move.notation(),
-        executed=result.executed,
-        captured=result.captured.symbol if result.captured else None,
-        measurements=measurements,
-        state=game.state(game_id),
-    )
+    return {
+        "move": result.move.notation(),
+        "executed": result.executed,
+        "captured": result.captured.symbol if result.captured else None,
+        "measurements": measurements,
+        "state": game.state(game_id),
+    }
 
 
 def serialize_search(search: SearchResult, limit: int = 5) -> SearchInfo:
@@ -258,7 +264,7 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
                 request.fen or STARTING_FEN, rng=np.random.default_rng(request.seed)
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         game_id = store.create(board)
         return store.get(game_id).state(game_id)
 
@@ -276,7 +282,7 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
         try:
             sq = parse_square(square)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         with game.lock:
             board = game.board
 
@@ -322,7 +328,7 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
             try:
                 result = game.board.do_move(request.to_notation())
             except (IllegalMoveError, ValueError) as exc:
-                raise HTTPException(status_code=400, detail=str(exc))
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
             response = MoveResponse(**serialize_result(request.game_id, game, result))
             game.publish({"type": "move", **response.model_dump(mode="json")})
             return response
@@ -361,13 +367,12 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
         try:
             board = QuantumBoard(request.fen or STARTING_FEN)  # dice are seeded on join
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
-        color = request.color
-        if color == "random":
-            color = secrets.choice(["white", "black"])
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        color: Color = secrets.choice(COLOR_NAMES) if request.color == "random" else request.color
         game_id = store.create(board, online=True)
         game = store.get(game_id)
         with game.lock:
+            assert game.seats is not None  # created as an online game
             token = game.seats[color] = secrets.token_urlsafe(16)
             state = game.state(game_id)
         return SeatResponse(game_id=game_id, color=color, token=token, state=state)
@@ -384,6 +389,7 @@ def create_app(store: Optional[GameStore] = None, ui_dir: Optional[Path] = UI_DI
             color = open_seats[0]
             token = game.seats[color] = secrets.token_urlsafe(16)
             game.guest_seed = request.seed or secrets.token_hex(32)
+            assert game.secret is not None  # every online game has one
             game.board.resolver.rng = SeededDice(game.secret, game.guest_seed)
             state = game.state(request.game_id)
             game.publish({"type": "state", "state": state.model_dump(mode="json")})
