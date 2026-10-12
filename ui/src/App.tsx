@@ -4,6 +4,7 @@ import { Board, GROUP_COLORS } from "./components/Board";
 import { type LogEntry, MoveLog } from "./components/MoveLog";
 import { OnlineCard } from "./components/OnlineCard";
 import { TutorialCard } from "./components/TutorialCard";
+import { randomSeed, useDesktop } from "./desktop";
 import { useLiveFeed } from "./live";
 import { completedMove, type Mode, nextSquares, parseMove, type ParsedMove } from "./moves";
 import { storage } from "./storage";
@@ -19,7 +20,9 @@ const MODES: { id: Mode; label: string; hint: string }[] = [
 const REPLY_DELAY_MS = 600; // let the player see their move before a tutorial reply
 
 const isOver = (state: GameState) => !!state.winner || !!state.draw_reason;
-const message = (e: unknown) => String(e instanceof Error ? e.message : e);
+// Errors from fetch are Errors; errors from the desktop bridge are plain { message } objects.
+const message = (e: unknown) =>
+  String(e && typeof e === "object" && "message" in e ? (e as { message: unknown }).message : e);
 const colorName = (color: Color) => (color === "white" ? "White" : "Black");
 
 /** Keep the address bar pointing at an online game, so a reload reopens it. */
@@ -58,6 +61,7 @@ export default function App() {
   const [seat, setSeat] = useState<Seat | null>(null);
   const [tutorial, setTutorial] = useState<TutorialProgress | null>(null);
   const [lessonsDone, setLessonsDone] = useState<string[]>(() => storage.lessonsDone());
+  const [desktop, setLanUrl] = useDesktop();
   const hoverToken = useRef(0);
   const started = useRef(false);
   const aiInFlight = useRef(false);
@@ -126,8 +130,9 @@ export default function App() {
     async (id: string) => {
       if (storage.seat(id)) return resume(id); // already playing in this game
       try {
-        const joined = await api.joinOnline(id);
-        storage.setSeat(id, { color: joined.color, token: joined.token });
+        const seed = randomSeed(); // our share of the dice, kept to verify them afterwards
+        const joined = await api.joinOnline(id, seed);
+        storage.setSeat(id, { color: joined.color, token: joined.token, seed });
         storage.setGameId(id);
         setUrlGame(id);
         showGame(joined.state, entriesFromHistory(joined.state));
@@ -146,6 +151,9 @@ export default function App() {
 
   const createOnline = (color: Color | "random") =>
     run(async () => {
+      // In the desktop app, start listening on the local network first: the invite link
+      // must point at an address the friend can reach.
+      if (desktop?.ownPage) setLanUrl(await desktop.api.host());
       const created = await api.createOnline(color);
       storage.setSeat(created.game_id, { color: created.color, token: created.token });
       storage.setGameId(created.game_id);
@@ -169,12 +177,16 @@ export default function App() {
     if (started.current) return; // React StrictMode runs mount effects twice in development
     started.current = true;
     const params = new URLSearchParams(window.location.search);
+    // The desktop app joins games itself and hands the seat over in the fragment.
+    const handed = /^#seat=(white|black)\.(.+)$/.exec(window.location.hash);
+    const gameParam = params.get("game");
+    if (handed && gameParam) storage.setSeat(gameParam, { color: handed[1] as Color, token: handed[2] });
     const joinId = params.get("join");
     if (joinId) {
       void join(joinId);
       return;
     }
-    const stored = params.get("game") ?? storage.gameId();
+    const stored = gameParam ?? storage.gameId();
     if (stored) void resume(stored);
     else void newGame();
   }, [join, newGame, resume]);
@@ -540,7 +552,17 @@ export default function App() {
           </div>
         )}
 
-        {!tutorial && <OnlineCard state={state} seat={seat} connected={connected} busy={busy} onCreate={createOnline} />}
+        {!tutorial && (
+          <OnlineCard
+            state={state}
+            seat={seat}
+            connected={connected}
+            busy={busy}
+            desktop={desktop}
+            onCreate={createOnline}
+            onJoin={(link) => void run(async () => desktop?.api.join(link))}
+          />
+        )}
 
         <div className="card log-card">
           <h2>Moves &amp; measurements</h2>

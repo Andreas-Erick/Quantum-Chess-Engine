@@ -48,7 +48,7 @@ export const api = {
   move: (gameId: string, notation: string, token?: string) =>
     post<MoveResponse>("/do_move", { game_id: gameId, notation, token }),
   createOnline: (color: Color | "random") => post<SeatResponse>("/online/create", { color }),
-  joinOnline: (gameId: string) => post<SeatResponse>("/online/join", { game_id: gameId }),
+  joinOnline: (gameId: string, seed: string) => post<SeatResponse>("/online/join", { game_id: gameId, seed }),
   aiMove: (gameId: string, level: LevelName) => post<AIMoveResponse>("/ai_move", { game_id: gameId, level }),
   levels: () => request<LevelInfo[]>("/levels"),
   correlations: (gameId: string, square: string) =>

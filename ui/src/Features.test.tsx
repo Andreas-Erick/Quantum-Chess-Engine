@@ -170,8 +170,14 @@ describe("online play", () => {
       if (url.startsWith("/legal_moves")) return { moves: [] };
     });
     await renderApp();
-    expect(calls.find((c) => c.url === "/online/join")?.body).toEqual({ game_id: "g2" });
-    expect(JSON.parse(localStorage.getItem("quantum-chess:seat:g2")!)).toEqual({ color: "black", token: "t2" });
+    const body = calls.find((c) => c.url === "/online/join")?.body;
+    expect(body?.game_id).toBe("g2");
+    expect(body?.seed).toMatch(/^[0-9a-f]{64}$/); // our share of the dice
+    expect(JSON.parse(localStorage.getItem("quantum-chess:seat:g2")!)).toEqual({
+      color: "black",
+      token: "t2",
+      seed: body?.seed,
+    });
     expect(window.location.search).toBe("?game=g2");
     const squares = screen.getAllByRole("button", { name: /^[a-h][1-8]/ });
     expect(squares[0].getAttribute("aria-label")).toMatch(/^h1/);
@@ -190,5 +196,96 @@ describe("online play", () => {
     expect(screen.getByText("Both seats are taken, so you are watching this game.")).toBeTruthy();
     expect(screen.getByText(/^You are watching this game./)).toBeTruthy();
     expect(square("e2").classList.contains("selectable")).toBe(false);
+  });
+});
+
+describe("desktop app", () => {
+  const online = { ...base, game_id: "g9", seats: { white: true, black: false } };
+
+  function bridge(localUrl: string) {
+    const calls: string[] = [];
+    window.pywebview = {
+      api: {
+        info: async () => ({ local_url: localUrl, lan_url: null }),
+        host: async () => {
+          calls.push("host");
+          return "http://192.168.1.20:5555";
+        },
+        join: async (link: string) => {
+          calls.push(`join ${link}`);
+        },
+        home: async () => {
+          calls.push("home");
+        },
+      },
+    };
+    return calls;
+  }
+
+  afterEach(() => {
+    delete window.pywebview;
+  });
+
+  it("hosts on the network, so the invite link points at the LAN address", async () => {
+    const calls = bridge(`${window.location.origin}/`);
+    serve((url) => {
+      if (url.startsWith("/init")) return { ...base, game_id: "local" };
+      if (url.startsWith("/levels")) return [];
+      if (url.startsWith("/legal_moves")) return { moves: [] };
+      if (url.startsWith("/online/create")) return { game_id: "g9", color: "white", token: "t", state: online };
+    });
+    await renderApp();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Host a game" }));
+    });
+    expect(calls).toEqual(["host"]);
+    expect((screen.getByLabelText("Invite link") as HTMLInputElement).value).toBe("http://192.168.1.20:5555/?join=g9");
+    expect(screen.getByText(/same network/)).toBeTruthy();
+  });
+
+  it("joins a friend's game through the app", async () => {
+    const calls = bridge(`${window.location.origin}/`);
+    serve((url) => {
+      if (url.startsWith("/init")) return { ...base, game_id: "local" };
+      if (url.startsWith("/levels")) return [];
+      if (url.startsWith("/legal_moves")) return { moves: [] };
+    });
+    await renderApp();
+    fireEvent.change(screen.getByLabelText("Invite link to join"), {
+      target: { value: "http://192.168.1.30:4444/?join=abc" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Join" }));
+    });
+    expect(calls).toEqual(["join http://192.168.1.30:4444/?join=abc"]);
+  });
+
+  it("on a friend's server, offers the way back instead of hosting", async () => {
+    const calls = bridge("http://127.0.0.1:9999/");
+    serve((url) => {
+      if (url.startsWith("/init")) return { ...base, game_id: "remote" };
+      if (url.startsWith("/levels")) return [];
+      if (url.startsWith("/legal_moves")) return { moves: [] };
+    });
+    await renderApp();
+    expect(screen.queryByRole("button", { name: "Host a game" })).toBeNull();
+    expect(screen.queryByLabelText("Invite link to join")).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Back to my games" }));
+    });
+    expect(calls).toEqual(["home"]);
+  });
+
+  it("takes over a seat the app handed over in the address", async () => {
+    window.history.replaceState(null, "", "/?game=g7#seat=white.tok7");
+    serve((url) => {
+      if (url.startsWith("/state")) return { ...base, game_id: "g7", seats: { white: true, black: true } };
+      if (url.startsWith("/levels")) return [];
+      if (url.startsWith("/legal_moves")) return { moves: [] };
+    });
+    await renderApp();
+    expect(JSON.parse(localStorage.getItem("quantum-chess:seat:g7")!)).toEqual({ color: "white", token: "tok7" });
+    expect(window.location.hash).toBe(""); // the token doesn't linger in the address
+    expect(screen.getByRole("status").textContent).toContain("White to move (you)");
   });
 });

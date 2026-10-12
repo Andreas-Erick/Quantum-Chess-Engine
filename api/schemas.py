@@ -112,6 +112,15 @@ class GameState(BaseModel):
         None,
         description="Online games only: which colours a player has claimed. Null for local games",
     )
+    fairness: Optional["FairnessInfo"] = Field(
+        None, description="Online games only: how the dice were seeded (see api/fairness.py)"
+    )
+
+
+class FairnessInfo(BaseModel):
+    commitment: str = Field(description="SHA-256 of the server's secret, published at creation")
+    guest_seed: Optional[str] = Field(None, description="The joiner's share, once they join")
+    secret: Optional[str] = Field(None, description="The server's secret, revealed at game over")
 
 
 class MoveResponse(BaseModel):
@@ -166,11 +175,16 @@ class LegalMovesResponse(BaseModel):
 class OnlineCreateRequest(BaseModel):
     color: Literal["white", "black", "random"] = Field("white", description="The creator's side")
     fen: Optional[str] = None
-    seed: Optional[int] = None
 
 
 class JoinRequest(BaseModel):
     game_id: str
+    seed: Optional[str] = Field(
+        None,
+        max_length=128,
+        description="The joiner's share of the dice (random hex). Generated if omitted, but then "
+        "the joiner has to trust the server",
+    )
 
 
 class SeatResponse(BaseModel):
