@@ -35,7 +35,8 @@ before merging:
 
 ```bash
 ruff check . && ruff format --check .       # lint and formatting (ruff format --write fixes it)
-mypy                                        # type check (settings in pyproject.toml)
+mypy                                        # type check; CI runs it on Linux, so for platform-
+                                            # specific code also try: mypy --platform linux
 pytest -q --cov                             # tests, and coverage of at least 85%
 cd ui && npm run lint && npm test && npm run build   # Biome lint + format, tests, types, build
 ```
