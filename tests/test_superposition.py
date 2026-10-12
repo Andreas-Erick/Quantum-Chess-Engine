@@ -188,13 +188,13 @@ def test_classical_moves_stay_out_of_register():
     assert len(board.register) == 0
 
 
-def test_slider_blocked_by_superposed_piece():
-    # Sliding through a superposed square is a Phase 3 (entanglement) move.
+def test_split_cannot_pass_through_superposed_piece():
+    # Jumps may slide through superposed squares (see test_entanglement.py); splits may not.
     board = QuantumBoard("4k3/8/8/8/8/8/8/RN2K3 w - - 0 1")
     board.do_move("b1^a3c3")
     board.do_move("e8d8")
     with pytest.raises(IllegalMoveError):
-        board.do_move("a1a5")
+        board.do_move("a1^a2a5")
 
 
 def test_legal_moves_include_quantum_moves():

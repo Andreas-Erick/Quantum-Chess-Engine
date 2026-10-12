@@ -24,6 +24,20 @@ class Measurement:
     collapsed: dict[int, bool] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class PathMeasurement:
+    """A joint measurement of "is every square on this path empty?".
+
+    Only the question asked is answered: if the path is blocked, the individual squares stay
+    uncertain (now correlated with each other) unless the outcome pins them down.
+    """
+
+    path: tuple[int, ...]
+    probability: float  # probability the path was clear, just before measuring
+    clear: bool  # the observed outcome
+    collapsed: dict[int, bool] = field(default_factory=dict)
+
+
 class ProbabilityResolver:
     """Samples measurement outcomes according to the Born rule."""
 
@@ -36,3 +50,10 @@ class ProbabilityResolver:
         register.project(sq, occupied)
         collapsed = register.release_definite()
         return Measurement(sq, p, occupied, collapsed)
+
+    def measure_path(self, register: QuantumRegister, path: list[int]) -> PathMeasurement:
+        p = register.probability_all_empty(path)
+        clear = self.rng.random() < p
+        register.project_all_empty(path, clear)
+        collapsed = register.release_definite()
+        return PathMeasurement(tuple(path), p, clear, collapsed)

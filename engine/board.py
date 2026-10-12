@@ -15,7 +15,9 @@ Rules in this phase:
   the move impossible (the attacker was not there, or the target turned out to be your own
   piece), the move fails and the turn still passes.
 * There is no check: a game is won by capturing the enemy king. En passant is not supported.
-* Sliding pieces cannot yet pass through superposed squares (Phase 3 adds entangling slides).
+* **Slide**: a jump whose path crosses possibly occupied squares. The piece moves only in the
+  branches where the path is empty, so its position becomes entangled with the blockers'. A
+  capture along such a path first measures whether the path is clear.
 """
 
 from __future__ import annotations
@@ -57,8 +59,8 @@ from engine.classical import (
     ClassicalBoard,
     Piece,
 )
-from engine.measurement import Measurement, ProbabilityResolver, RandomSource
-from engine.moves import MoveType, QuantumMove, jump_ops, merge_ops, split_ops
+from engine.measurement import Measurement, PathMeasurement, ProbabilityResolver, RandomSource
+from engine.moves import MoveType, QuantumMove, merge_ops, slide_ops, split_ops
 from engine.register import QuantumRegister, square_qubit
 
 
@@ -70,7 +72,7 @@ class IllegalMoveError(ValueError):
 class MoveResult:
     move: QuantumMove
     executed: bool  # False when a measurement made the move impossible
-    measurements: list[Measurement] = field(default_factory=list)
+    measurements: list[Measurement | PathMeasurement] = field(default_factory=list)
     captured: Optional[Piece] = None
     winner: Optional[int] = None
 
@@ -105,8 +107,26 @@ class QuantumBoard:
         """Occupancy probability of every square, indexed a1 = 0 ... h8 = 63."""
         return [self.probability(sq) for sq in range(64)]
 
+    def joint_probability(self, assignment: dict[int, bool]) -> float:
+        """Probability that every square in ``assignment`` has the given occupancy at once.
+
+        Unlike multiplying :meth:`probability` values, this accounts for entanglement.
+        """
+        quantum = {}
+        for sq, occupied in assignment.items():
+            if sq in self.register:
+                quantum[sq] = occupied
+            elif (self.labels[sq] is not None) != occupied:
+                return 0.0
+        return self.register.joint_probability(quantum) if quantum else 1.0
+
     def _labelled(self) -> int:
         return sum(bit(sq) for sq, p in enumerate(self.labels) if p is not None)
+
+    def _certainly_occupied(self) -> int:
+        return sum(
+            bit(sq) for sq, p in enumerate(self.labels) if p is not None and self.is_classical(sq)
+        )
 
     def _certainly_own(self, color: int) -> int:
         return sum(
@@ -117,19 +137,21 @@ class QuantumBoard:
 
     # --- Move shape ------------------------------------------------------------------
 
-    def reachable(self, src: int) -> int:
-        """Bitboard of squares the piece on ``src`` may jump to, ignoring castling.
+    def reachable(self, src: int, slide: bool = True) -> int:
+        """Bitboard of squares the piece on ``src`` may move to, ignoring castling.
 
-        Squares that are possibly occupied block sliding pieces. A target that might be
-        occupied is allowed; whether the move succeeds is settled by measurement.
+        With ``slide`` (jumps), only certainly occupied squares block a path; a path through
+        possibly occupied squares becomes an entangling slide. Without it (splits and merges),
+        any possibly occupied square blocks. A target that might be occupied is allowed;
+        whether the move succeeds is settled by measurement.
         """
         piece = self.labels[src]
         if piece is None:
             return 0
-        blockers = self._labelled()
+        blockers = self._certainly_occupied() if slide else self._labelled()
         not_own = ~self._certainly_own(piece.color)
         if piece.kind == PAWN:
-            return self._pawn_targets(src, piece.color)
+            return self._pawn_targets(src, piece.color, slide)
         if piece.kind == KNIGHT:
             return KNIGHT_ATTACKS[src] & not_own
         if piece.kind == KING:
@@ -141,7 +163,7 @@ class QuantumBoard:
             attacks |= rook_attacks(src, blockers)
         return attacks & not_own
 
-    def _pawn_targets(self, src: int, color: int) -> int:
+    def _pawn_targets(self, src: int, color: int, slide: bool) -> int:
         forward = 8 if color == WHITE else -8
         start_rank = 1 if color == WHITE else 6
         targets = 0
@@ -155,7 +177,7 @@ class QuantumBoard:
             two = one + forward
             if (
                 rank_of(src) == start_rank
-                and self.labels[one] is None
+                and (self.labels[one] is None or (slide and not self.is_classical(one)))
                 and (self.labels[two] is None or not self.is_classical(two))
             ):
                 targets |= bit(two)
@@ -215,7 +237,7 @@ class QuantumBoard:
         if move.move_type is MoveType.SPLIT:
             if move.target == move.target2:
                 raise IllegalMoveError("split targets must differ")
-            reach = self.reachable(move.source)
+            reach = self.reachable(move.source, slide=False)
             for t in (move.target, move.target2):
                 if not reach & bit(t) or self.labels[t] is not None:
                     raise IllegalMoveError(f"cannot split onto {square_name(t)}")
@@ -226,7 +248,9 @@ class QuantumBoard:
             raise IllegalMoveError("merge needs two parts of the same kind of piece")
         if self.is_classical(move.source) or self.is_classical(move.source2):
             raise IllegalMoveError("both merge sources must be in superposition")
-        common = self.reachable(move.source) & self.reachable(move.source2)
+        common = self.reachable(move.source, slide=False) & self.reachable(
+            move.source2, slide=False
+        )
         if not common & bit(move.target) or self.labels[move.target] is not None:
             raise IllegalMoveError(f"cannot merge onto {square_name(move.target)}")
 
@@ -247,13 +271,14 @@ class QuantumBoard:
                     moves.append(QuantumMove.jump(src, dst))
             if piece.kind == PAWN:
                 continue
-            empty = [t for t in iter_squares(reach) if self.labels[t] is None]
+            strict = self.reachable(src, slide=False)
+            empty = [t for t in iter_squares(strict) if self.labels[t] is None]
             moves.extend(QuantumMove.split(src, a, b) for a, b in combinations(empty, 2))
             if not self.is_classical(src):
                 superposed.setdefault(piece, []).append(src)
         for squares in superposed.values():
             for a, b in combinations(squares, 2):
-                common = self.reachable(a) & self.reachable(b)
+                common = self.reachable(a, slide=False) & self.reachable(b, slide=False)
                 moves.extend(
                     QuantumMove.merge(a, b, t)
                     for t in iter_squares(common)
@@ -347,41 +372,70 @@ class QuantumBoard:
         if self.labels[src] is None:  # collapsed away by the measurement above
             return result
 
+        path = self._path(src, tgt)
+        if path is None:  # the measurement left a piece certainly in the way
+            return result
+
         target_piece = self.labels[tgt]
         if target_piece is None:
             if diagonal_pawn:  # nothing to capture after all
                 return result
-            self._move_piece(move)
+            self._move_piece(move, path)
             result.executed = True
             return result
 
         if target_piece.color == piece.color or (piece.kind == PAWN and not diagonal_pawn):
             return result  # blocked
 
+        if path:
+            path_measurement = self._measure_path(path)
+            result.measurements.append(path_measurement)
+            if not path_measurement.clear or self.labels[src] is None:
+                return result
         if not self.is_classical(src):
             measurement = self._measure(src)
             result.measurements.append(measurement)
             if not measurement.occupied:
                 return result
         self.labels[tgt] = None
-        self._move_piece(move)
+        self._move_piece(move, [])
         result.captured = target_piece
         result.executed = True
         return result
 
-    def _move_piece(self, move: QuantumMove) -> None:
-        """Move whatever amplitude is on ``source`` to the (certainly empty) target."""
+    def _path(self, src: int, tgt: int) -> Optional[list[int]]:
+        """Possibly occupied squares strictly between ``src`` and ``tgt``.
+
+        Returns ``None`` if a square on the path is certainly occupied.
+        """
+        path = [sq for sq in iter_squares(BETWEEN[src][tgt]) if self.labels[sq] is not None]
+        if any(self.is_classical(sq) for sq in path):
+            return None
+        return path
+
+    def _measure_path(self, path: list[int]) -> PathMeasurement:
+        measurement = self.resolver.measure_path(self.register, path)
+        self._release(measurement.collapsed)
+        return measurement
+
+    def _move_piece(self, move: QuantumMove, path: list[int]) -> None:
+        """Move whatever amplitude is on ``source`` to the (certainly empty) target.
+
+        If ``path`` holds possibly occupied squares, the move is a *slide*: the piece moves
+        only in the branches where the whole path is empty, which entangles it with them.
+        """
         src, tgt = move.source, move.target
         piece = self.labels[src]
-        if self.is_classical(src):
-            if move.promotion is not None or (piece.kind == PAWN and rank_of(tgt) in (0, 7)):
-                promotion = move.promotion if move.promotion is not None else QUEEN
-                piece = Piece(piece.color, promotion)
+        if piece.kind == PAWN and rank_of(tgt) in (0, 7):
+            piece = Piece(piece.color, move.promotion if move.promotion is not None else QUEEN)
+        if self.is_classical(src) and not path:
             self.labels[tgt], self.labels[src] = piece, None
             return
+        self._activate(src)
         self._activate(tgt)
         self.labels[tgt] = piece
-        self._apply(jump_ops(square_qubit(src), square_qubit(tgt)))
+        q = square_qubit
+        self._apply(slide_ops(q(src), q(tgt), [q(sq) for sq in path]))
 
     def _update_winner(self) -> None:
         for color in (WHITE, BLACK):
