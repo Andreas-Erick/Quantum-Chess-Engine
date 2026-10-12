@@ -130,3 +130,21 @@ def test_live_feed_for_unknown_game_is_refused(client):
         with client.websocket_connect("/ws?game_id=nope") as feed:
             feed.receive_json()
     assert excinfo.value.code == 4404
+
+
+def test_store_forgets_the_least_recently_used_game():
+    store = GameStore(max_games=3)
+    client = TestClient(create_app(store))
+    first, second, third = (client.post("/init").json()["game_id"] for _ in range(3))
+    client.get("/state", params={"game_id": first})  # keeps it fresh
+    client.post("/init")
+    assert client.get("/state", params={"game_id": second}).status_code == 404
+    for game_id in (first, third):
+        assert client.get("/state", params={"game_id": game_id}).is_success
+
+
+def test_oversized_fields_are_refused(client):
+    assert client.post("/init", json={"fen": "8/" * 200}).status_code == 422
+    game_id = client.post("/init").json()["game_id"]
+    body = {"game_id": game_id, "notation": "e2e4" * 100}
+    assert client.post("/do_move", json=body).status_code == 422

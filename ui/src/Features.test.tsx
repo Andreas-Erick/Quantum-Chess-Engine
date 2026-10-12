@@ -202,14 +202,17 @@ describe("online play", () => {
 describe("desktop app", () => {
   const online = { ...base, game_id: "g9", seats: { white: true, black: false } };
 
-  function bridge(localUrl: string) {
+  function bridge(ownPage: boolean) {
     const calls: string[] = [];
     window.pywebview = {
       api: {
-        info: async () => ({ local_url: localUrl, lan_url: null }),
+        info: async () => ({ own_page: ownPage, lan_url: null }),
         host: async () => {
           calls.push("host");
           return "http://192.168.1.20:5555";
+        },
+        stop_hosting: async () => {
+          calls.push("stop");
         },
         join: async (link: string) => {
           calls.push(`join ${link}`);
@@ -227,7 +230,7 @@ describe("desktop app", () => {
   });
 
   it("hosts on the network, so the invite link points at the LAN address", async () => {
-    const calls = bridge(`${window.location.origin}/`);
+    const calls = bridge(true);
     serve((url) => {
       if (url.startsWith("/init")) return { ...base, game_id: "local" };
       if (url.startsWith("/levels")) return [];
@@ -241,10 +244,16 @@ describe("desktop app", () => {
     expect(calls).toEqual(["host"]);
     expect((screen.getByLabelText("Invite link") as HTMLInputElement).value).toBe("http://192.168.1.20:5555/?join=g9");
     expect(screen.getByText(/same network/)).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Stop hosting" }));
+    });
+    expect(calls).toEqual(["host", "stop"]);
+    expect(screen.queryByRole("button", { name: "Stop hosting" })).toBeNull();
   });
 
   it("joins a friend's game through the app", async () => {
-    const calls = bridge(`${window.location.origin}/`);
+    const calls = bridge(true);
     serve((url) => {
       if (url.startsWith("/init")) return { ...base, game_id: "local" };
       if (url.startsWith("/levels")) return [];
@@ -261,7 +270,7 @@ describe("desktop app", () => {
   });
 
   it("on a friend's server, offers the way back instead of hosting", async () => {
-    const calls = bridge("http://127.0.0.1:9999/");
+    const calls = bridge(false);
     serve((url) => {
       if (url.startsWith("/init")) return { ...base, game_id: "remote" };
       if (url.startsWith("/levels")) return [];

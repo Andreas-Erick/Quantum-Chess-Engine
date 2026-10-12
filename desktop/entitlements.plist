@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- What the signed macOS app may do under the hardened runtime (notarization requires it).
+     Python's ctypes and libffi, which PyObjC uses to drive WebKit, write callable code at run
+     time. Nothing else is granted: no camera, microphone, files or other sandbox exceptions. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>

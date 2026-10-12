@@ -1,0 +1,12 @@
+# Weekly update PRs for what is pinned: the workflows' actions (pinned to commits) and the UI's
+# npm packages. The Python lock files are regenerated with the command in their headers.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
