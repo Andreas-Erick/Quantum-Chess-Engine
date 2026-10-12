@@ -1,4 +1,4 @@
-# Quantum Chess
+# Quantum Chess Engine
 
 [![CI](https://github.com/Andreas-Erick/Quantum-Chess/actions/workflows/ci.yml/badge.svg)](https://github.com/Andreas-Erick/Quantum-Chess/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
@@ -82,7 +82,7 @@ them it is built unsigned.
 
 1. The host clicks **Host a game** in the **Play a friend** card. Their app starts accepting
    players from the local network, and the invite link points at it
-   (`http://192.168.1.20:52814/?join=…`). Windows may ask to allow Quantum Chess through the
+   (`http://192.168.1.20:52814/?join=…`). Windows may ask to allow Quantum Chess Engine through the
    firewall the first time: allow it on **private networks only**. Host only on networks you
    trust, like your home Wi-Fi, and click **Stop hosting** when you're done (closing the app
    stops it too). Other machines can only join and play your online games, not start games or
@@ -179,7 +179,7 @@ the same names: `POST /ai_move {"game_id": ..., "level": "hard"}`, and `GET /lev
 
 ## Privacy and security
 
-Quantum Chess is a hobby project: reviewed for security, but not professionally audited. Host
+Quantum Chess Engine is a hobby project: reviewed for security, but not professionally audited. Host
 games only with people you trust, and report problems privately as described in
 [SECURITY.md](SECURITY.md).
 

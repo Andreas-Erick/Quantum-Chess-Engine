@@ -1,6 +1,6 @@
 # Security policy
 
-Quantum Chess is a hobby project maintained by one person. It has had a security review, but no
+Quantum Chess Engine is a hobby project maintained by one person. It has had a security review, but no
 professional audit. Please report problems privately so they can be fixed before they are
 widely known.
 

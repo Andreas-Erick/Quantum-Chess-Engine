@@ -55,5 +55,9 @@ if sys.platform == "darwin":
         name="QuantumChess.app",
         icon=ICON,
         bundle_identifier="io.github.andreas-erick.quantum-chess",
-        info_plist={"NSHighResolutionCapable": True},
+        info_plist={
+            "CFBundleName": "Quantum Chess Engine",
+            "CFBundleDisplayName": "Quantum Chess Engine",
+            "NSHighResolutionCapable": True,
+        },
     )
