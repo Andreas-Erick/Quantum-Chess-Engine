@@ -1,6 +1,6 @@
 # Quantum Chess Engine
 
-[![CI](https://github.com/Andreas-Erick/Quantum-Chess/actions/workflows/ci.yml/badge.svg)](https://github.com/Andreas-Erick/Quantum-Chess/actions/workflows/ci.yml)
+[![CI](https://github.com/Andreas-Erick/Quantum-Chess-Engine/actions/workflows/ci.yml/badge.svg)](https://github.com/Andreas-Erick/Quantum-Chess-Engine/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Cirq](https://img.shields.io/badge/quantum-Cirq-6d4aff)
@@ -49,7 +49,7 @@ uvicorn api.server:app
 <summary>Desktop app</summary>
 
 Download the installer from the
-[releases page](https://github.com/Andreas-Erick/Quantum-Chess/releases):
+[releases page](https://github.com/Andreas-Erick/Quantum-Chess-Engine/releases):
 `QuantumChess-Setup-<version>.exe` for Windows (no admin rights needed; adds a Start menu entry
 and an uninstaller) or `QuantumChess-<version>.dmg` for macOS (drag the app to Applications).
 Or run it from source:
