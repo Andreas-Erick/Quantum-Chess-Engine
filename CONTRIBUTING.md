@@ -66,9 +66,10 @@ Pull requests that change the app also build the Windows and macOS installers.
   invariant a function relies on. Docstrings say what a function promises.
 - **Style** is automatic: Ruff formats Python (100 columns) and Biome formats TypeScript and CSS
   (120 columns, double quotes, semicolons). `.editorconfig` sets the basics for other files.
-- **Types**: Python code is type-checked by mypy and the UI by TypeScript. When a value can be
-  missing only in some cases (a move's second target, say), give it an accessor that states the
-  rule, like `QuantumMove.split_targets`, rather than silencing the checker.
+- **Types**: Python code is type-checked by mypy and the UI by TypeScript. When a value exists
+  only in some cases (a second target only for a split, say), make those cases their own types,
+  like `Jump`, `Split` and `Merge` in `engine/moves.py`, rather than optional fields or silencing
+  the checker.
 - **Commit messages**: an imperative subject line ("Add …", "Fix …") of at most about 70
   characters, then a body that explains what changed and why, wrapped at 72.
 - **Dependencies**: `requirements*.txt` give version ranges, and CI tests the newest versions in

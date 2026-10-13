@@ -63,7 +63,7 @@ usable on its own: in a notebook, another server, or a different AI.
 | `bitboard.py` | Square numbering (a1 = 0 … h8 = 63), attack tables, sliding-piece rays. |
 | `classical.py` | `ClassicalBoard`: a complete, perft-verified chess engine (FEN, castling, en passant, promotion, every draw rule). |
 | `register.py` | `QuantumRegister`: the sparse quantum state, as independent Cirq state vectors. |
-| `moves.py` | `QuantumMove` (jump, split, merge), its notation, and the iSWAP-family gates for each move. |
+| `moves.py` | The moves `Jump`, `Split` and `Merge` (`QuantumMove` is any of them), their notation, and the iSWAP-family gates for each. |
 | `measurement.py` | `ProbabilityResolver`: samples outcomes by the Born rule and collapses the state. |
 | `board.py` | `QuantumBoard`: the rules of quantum chess, built from all of the above. This is the class everything else uses. |
 
@@ -291,9 +291,9 @@ docs/               this guide, the API reference, README screenshots
 
 ### A new rule or move type
 
-1. Add it to `MoveType` and `QuantumMove` in `engine/moves.py`, with notation, `parse`,
-   `notation()`, and a function returning its gates. Gates must conserve occupancy, like the
-   iSWAP family.
+1. Add a frozen dataclass for it in `engine/moves.py` with `squares` and `notation()`, add it
+   to the `QuantumMove` union and to `parse_move`, and write a function returning its gates.
+   Gates must conserve occupancy, like the iSWAP family.
 2. Handle it in `QuantumBoard`: `validate`, `legal_moves`, and a `_<move>` method dispatched
    from `do_move`.
 3. Test it in the engine first. `tests/test_superposition.py` and
