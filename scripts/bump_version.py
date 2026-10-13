@@ -46,7 +46,8 @@ def bump(version: str) -> list[str]:
         if n != count:
             raise SystemExit(f"{name}: expected {count} version line(s), found {n}")
         if text_new != text:
-            path.write_text(text_new, encoding="utf-8")
+            # LF on every platform, as .gitattributes stores them (not CRLF on Windows).
+            path.write_text(text_new, encoding="utf-8", newline="\n")
             changed.append(name)
     return changed
 
