@@ -202,9 +202,14 @@ therefore average over the quantum dice.
 React 19, TypeScript and Vite. FastAPI serves the built app (`ui/dist`) at `/`. During
 development, Vite serves it on :5173 and proxies API calls to :8000.
 
-- **`App.tsx`** holds the game flow: local games against the AI, the tutorial, online games, and
-  the desktop bridge. It's the largest UI file; new features are best added as their own hooks
-  or components rather than more state here.
+- **`App.tsx`** puts the page together: it picks squares into moves and renders the board and
+  panels. The game flow lives in hooks under `hooks/`:
+  - `useGame`: the game on screen (state, move log, legal moves, selection) and the plumbing the
+    others share: `run` (busy and error handling), `showGame` and `applyResponse`.
+  - `useAi`: the AI's colour and strength, and its automatic replies in local games.
+  - `useTutorial`: the lesson in progress and the lessons finished.
+  - `useOnline`: creating and joining online games, the live feed, desktop hosting, and opening
+    the game a link points at when the page loads.
 - **`components/`**: `Board` (rendering only), `MoveLog`, `TutorialCard`, `OnlineCard`.
 - **`moves.ts`**: clicks → move notation, driven entirely by the legal-move list.
 - **`live.ts`**: the `/ws` feed with reconnects. **`storage.ts`**: per-browser state (the
@@ -268,7 +273,8 @@ desktop/
   quantum_chess.spec, installer.iss   PyInstaller build and the Windows installer
   sign-windows.ps1, entitlements.plist   release signing (Windows), hardened runtime (macOS)
 ui/src/
-  App.tsx           game flow: local, AI, tutorial and online games
+  App.tsx           the page: board, panels, picking squares into moves
+  hooks/            useGame, useAi, useTutorial, useOnline: the game flow
   components/       Board, MoveLog, TutorialCard, OnlineCard
   tutorial/         lessons.json and its types
   api.ts, types.ts  the JSON contract, mirrored from api/schemas.py
@@ -324,6 +330,7 @@ the last step. `tests/test_tutorial.py` checks that it is playable on the real e
 
 ### A UI panel or feature
 
-Put it in its own component under `ui/src/components/`, with its state in a hook rather than
-more `useState` in `App.tsx`. Server data comes through `ui/src/api.ts`, and live updates through
+Put it in its own component under `ui/src/components/`, with its state in a hook under
+`ui/src/hooks/` rather than more `useState` in `App.tsx`. A hook that changes the game takes the
+`Game` from `useGame` and goes through its `run` and `applyResponse`. Server data comes through `ui/src/api.ts`, and live updates through
 `useLiveFeed`. UI tests use Testing Library with a stubbed `fetch`; see `ui/src/Features.test.tsx`.
