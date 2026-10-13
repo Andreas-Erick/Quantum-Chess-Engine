@@ -1,5 +1,5 @@
 # The same checks as CI, before each commit: `pre-commit install` once (see CONTRIBUTING.md).
-# The hooks use the tools from your environment (requirements-dev.txt and ui/node_modules), so
+# The hooks use the tools from your environment (the dev extra in pyproject.toml and ui/node_modules), so
 # they always match the versions CI runs.
 repos:
   - repo: local

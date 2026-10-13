@@ -25,7 +25,7 @@ on:
       - "desktop/**"
       - "engine/**"
       - "ui/**"
-      - "requirements*.txt"
+      - "pyproject.toml"
       - "requirements*.lock"
       - ".github/workflows/desktop.yml"
 
