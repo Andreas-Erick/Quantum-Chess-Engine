@@ -66,7 +66,16 @@ from engine.classical import (
     Piece,
 )
 from engine.measurement import Measurement, PathMeasurement, ProbabilityResolver, RandomSource
-from engine.moves import MoveType, QuantumMove, merge_ops, slide_ops, split_ops
+from engine.moves import (
+    Jump,
+    Merge,
+    QuantumMove,
+    Split,
+    merge_ops,
+    parse_move,
+    slide_ops,
+    split_ops,
+)
 from engine.register import QuantumRegister, square_qubit
 
 # A split halves the source's probability; no split may create a part less likely than this.
@@ -333,7 +342,7 @@ class QuantumBoard:
             raise IllegalMoveError("the game is over")
         piece = self._own_piece(move.source)
 
-        if move.move_type is MoveType.JUMP:
+        if isinstance(move, Jump):
             reach = self.reachable(move.source)
             if piece.kind == KING:
                 reach |= self._castling_targets(piece.color)
@@ -349,8 +358,8 @@ class QuantumBoard:
         if piece.kind == PAWN:
             raise IllegalMoveError("pawns cannot split or merge")
 
-        if move.move_type is MoveType.SPLIT:
-            t1, t2 = move.split_targets
+        if isinstance(move, Split):
+            t1, t2 = move.targets
             if t1 == t2:
                 raise IllegalMoveError("split targets must differ")
             if not self.can_split(move.source):
@@ -363,8 +372,7 @@ class QuantumBoard:
                     raise IllegalMoveError(f"cannot split onto {square_name(t)}")
             return
 
-        # Merge
-        s1, s2 = move.merge_sources
+        s1, s2 = move.sources  # a merge
         if s1 == s2 or self.labels[s2] != piece:
             raise IllegalMoveError("merge needs two parts of the same kind of piece")
         if self.is_classical(s1) or self.is_classical(s2):
@@ -385,39 +393,35 @@ class QuantumBoard:
             jumps = reach | (self._castling_targets(piece.color) if piece.kind == KING else 0)
             for dst in iter_squares(jumps):
                 if piece.kind == PAWN and rank_of(dst) in (0, 7):
-                    moves.extend(QuantumMove.jump(src, dst, p) for p in PROMOTION_PIECES)
+                    moves.extend(Jump(src, dst, p) for p in PROMOTION_PIECES)
                 else:
-                    moves.append(QuantumMove.jump(src, dst))
+                    moves.append(Jump(src, dst))
             if piece.kind == PAWN:
                 continue
             if self.can_split(src):
                 strict = self.reachable(src, slide=False)
                 empty = [t for t in iter_squares(strict) if self.labels[t] is None]
-                moves.extend(QuantumMove.split(src, a, b) for a, b in combinations(empty, 2))
+                moves.extend(Split(src, a, b) for a, b in combinations(empty, 2))
             if not self.is_classical(src):
                 superposed.setdefault(piece, []).append(src)
         for squares in superposed.values():
             for a, b in combinations(squares, 2):
                 common = self.reachable(a, slide=False) & self.reachable(b, slide=False)
-                moves.extend(
-                    QuantumMove.merge(a, b, t)
-                    for t in iter_squares(common)
-                    if self.labels[t] is None
-                )
+                moves.extend(Merge(a, b, t) for t in iter_squares(common) if self.labels[t] is None)
         return moves
 
     # --- Execution -------------------------------------------------------------------
 
     def do_move(self, move: QuantumMove | str) -> MoveResult:
         if isinstance(move, str):
-            move = QuantumMove.parse(move)
+            move = parse_move(move)
         self.validate(move)
         mover = self._piece(move.source)
 
         try:
-            if move.move_type is MoveType.SPLIT:
+            if isinstance(move, Split):
                 result = self._split(move)
-            elif move.move_type is MoveType.MERGE:
+            elif isinstance(move, Merge):
                 result = self._merge(move)
             else:
                 result = self._jump(move)
@@ -458,9 +462,9 @@ class QuantumBoard:
         self._release(measurement.collapsed)
         return measurement
 
-    def _split(self, move: QuantumMove) -> MoveResult:
+    def _split(self, move: Split) -> MoveResult:
         piece = self._piece(move.source)
-        t1, t2 = move.split_targets
+        t1, t2 = move.targets
         for sq in (move.source, t1, t2):
             self._activate(sq)
         self.labels[t1] = self.labels[t2] = piece
@@ -468,15 +472,15 @@ class QuantumBoard:
         self._apply(split_ops(q(move.source), q(t1), q(t2)))
         return MoveResult(move, executed=True)
 
-    def _merge(self, move: QuantumMove) -> MoveResult:
-        s1, s2 = move.merge_sources
+    def _merge(self, move: Merge) -> MoveResult:
+        s1, s2 = move.sources
         self._activate(move.target)
         self.labels[move.target] = self._piece(s1)
         q = square_qubit
         self._apply(merge_ops(q(s1), q(s2), q(move.target)))
         return MoveResult(move, executed=True)
 
-    def _jump(self, move: QuantumMove) -> MoveResult:
+    def _jump(self, move: Jump) -> MoveResult:
         src, tgt = move.source, move.target
         piece = self._piece(src)
         result = MoveResult(move, executed=False)
@@ -549,7 +553,7 @@ class QuantumBoard:
         self._release(measurement.collapsed)
         return measurement
 
-    def _move_piece(self, move: QuantumMove, path: list[int]) -> None:
+    def _move_piece(self, move: Jump, path: list[int]) -> None:
         """Move whatever amplitude is on ``source`` to the (certainly empty) target.
 
         If ``path`` holds possibly occupied squares, the move is a *slide*: the piece moves
