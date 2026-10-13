@@ -2,4 +2,4 @@
 
 # The release version. scripts/bump_version.py keeps it in step with pyproject.toml and
 # ui/package.json; tests/test_version.py fails if they disagree.
-__version__ = "0.8.2"
+__version__ = "0.9.0"
