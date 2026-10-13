@@ -1,7 +1,7 @@
 # PyInstaller spec for the desktop app. Build from the project root, after building the UI:
 #
 #     cd ui && npm ci && npm run build && cd ..
-#     pip install -r requirements-desktop.txt
+#     pip install -e ".[bundle]"
 #     pyinstaller desktop/quantum_chess.spec --noconfirm
 #
 # Output: dist/QuantumChess/ (a folder with the QuantumChess executable; on macOS also
