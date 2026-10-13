@@ -17,6 +17,8 @@ are taken from its section here (see CONTRIBUTING.md, *Releasing*).
   pre-commit configuration runs the same checks before each commit.
 
 ### Changed
+- The UI's game flow moved out of `App.tsx` into hooks (`useGame`, `useAi`, `useTutorial`,
+  `useOnline`). Nothing changes for players.
 - Dependabot groups minor and patch updates into one weekly pull request per ecosystem.
 - Development dependencies: vite 8.3.4, vitest 5.0.3, @vitejs/plugin-react 6.1.2, jsdom 30.1.2.
 
