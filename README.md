@@ -38,7 +38,7 @@ play** for seven short interactive lessons.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -e .
 (cd ui && npm ci && npm run build)                      # optional: the UI served at /
 uvicorn api.server:app
 ```
@@ -55,13 +55,14 @@ and an uninstaller) or `QuantumChess-<version>.dmg` for macOS (drag the app to A
 Or run it from source:
 
 ```bash
-pip install -r requirements-desktop.txt
+pip install -e ".[desktop]"
 (cd ui && npm ci && npm run build)
-python -m desktop                          # the game in its own window, engine in-process
+quantum-chess                              # the game in its own window (or: python -m desktop)
 python -m desktop --lan                    # start hosting on your network right away
 python -m desktop --server https://...     # open a hosted server instead of a local one
 pip install --require-hashes -r requirements-desktop.lock   # the exact versions releases use
-pyinstaller desktop/quantum_chess.spec     # build dist/QuantumChess yourself
+pip install -e ".[bundle]"                 # adds PyInstaller, to build the app yourself:
+pyinstaller desktop/quantum_chess.spec     # build dist/QuantumChess
 iscc /DAppVersion=1.2.3 desktop/installer.iss   # then the Windows installer (Inno Setup 6)
 python -m desktop.make_icon                # redraw the icons (needs pillow and fonttools)
 ```

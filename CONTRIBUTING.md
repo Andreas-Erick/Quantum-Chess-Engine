@@ -12,11 +12,13 @@ You need Python 3.10 or newer and Node.js 24.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements-dev.txt                     # the server, the engine and the tools
+pip install -e ".[dev]"                                 # the server, the engine and the tools
 cd ui && npm ci && cd ..                                # the UI
 ```
 
-For the desktop app, also `pip install -r requirements-desktop.txt`.
+For the desktop app, use `pip install -e ".[dev,desktop]"` instead (`bundle` adds PyInstaller).
+The install is editable (`-e`): the server serves `ui/dist` from the checkout, and your edits take
+effect without reinstalling.
 
 ## Running
 
@@ -24,8 +26,8 @@ For the desktop app, also `pip install -r requirements-desktop.txt`.
 uvicorn api.server:app --reload             # API on :8000 (serves ui/dist if it is built)
 cd ui && npm run dev                        # UI with hot reload on :5173, proxying to :8000
 cd ui && npm run build                      # build ui/dist, which the server and desktop app serve
-python -m desktop                           # the desktop app, from source (build the UI first)
-python -m agent.arena --games 40 --a iterations=400 --b iterations=100   # AI strength match
+quantum-chess                               # the desktop app, from source (build the UI first)
+quantum-chess-arena --games 40 --a iterations=400 --b iterations=100   # AI strength match
 ```
 
 ## Checks
@@ -72,10 +74,11 @@ Pull requests that change the app also build the Windows and macOS installers.
   the checker.
 - **Commit messages**: an imperative subject line ("Add …", "Fix …") of at most about 70
   characters, then a body that explains what changed and why, wrapped at 72.
-- **Dependencies**: `requirements*.txt` give version ranges, and CI tests the newest versions in
-  them. The Docker image and desktop releases install from `requirements.lock` and
-  `requirements-desktop.lock` (exact versions with hashes). After changing a requirements file,
-  regenerate its lock with the `uv pip compile` command in the lock's header.
+- **Dependencies**: `pyproject.toml` gives version ranges (`dependencies`, and the extras
+  `desktop`, `bundle` and `dev`), and CI tests the newest versions in them. The Docker image and
+  desktop releases install from `requirements.lock` and `requirements-desktop.lock` (exact
+  versions with hashes). After changing a dependency, regenerate both locks with the
+  `uv pip compile` commands in their headers.
 
 ## Pull requests
 

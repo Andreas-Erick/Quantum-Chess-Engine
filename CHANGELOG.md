@@ -7,6 +7,11 @@ are taken from its section here (see CONTRIBUTING.md, *Releasing*).
 ## [Unreleased]
 
 ### Added
+- `pyproject.toml` is a full package definition: dependencies, the extras `desktop`, `bundle`
+  (PyInstaller) and `dev`, and the commands `quantum-chess` (the desktop app),
+  `quantum-chess-arena` and `quantum-chess-verify`. Install with `pip install -e ".[dev]"`; it
+  replaces `requirements.txt`, `requirements-desktop.txt` and `requirements-dev.txt`. The lock
+  files are generated from it and keep the same versions.
 - Architecture guide (`docs/architecture.md`), API reference (`docs/api.md`), contributor guide
   (`CONTRIBUTING.md`) and this changelog. GitHub releases take their notes from it.
 - `scripts/bump_version.py` sets the version everywhere at once; a test checks that every copy
