@@ -14,8 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 
 import cirq
 
@@ -25,90 +24,101 @@ SQRT_ISWAP = cirq.ISWAP**0.5
 SQRT_ISWAP_INV = cirq.ISWAP**-0.5
 
 
-class MoveType(Enum):
-    JUMP = "jump"
-    SPLIT = "split"
-    MERGE = "merge"
+class _Move:
+    """What every move offers: its notation (also its ``str``) and the squares it touches."""
 
-
-@dataclass(frozen=True)
-class QuantumMove:
-    move_type: MoveType
-    source: int
-    target: int
-    source2: Optional[int] = None  # second source of a merge
-    target2: Optional[int] = None  # second target of a split
-    promotion: Optional[int] = None
-
-    @classmethod
-    def jump(cls, source: int, target: int, promotion: Optional[int] = None) -> QuantumMove:
-        return cls(MoveType.JUMP, source, target, promotion=promotion)
-
-    @classmethod
-    def split(cls, source: int, target: int, target2: int) -> QuantumMove:
-        return cls(MoveType.SPLIT, source, target, target2=target2)
-
-    @classmethod
-    def merge(cls, source: int, source2: int, target: int) -> QuantumMove:
-        return cls(MoveType.MERGE, source, target, source2=source2)
-
-    @property
-    def split_targets(self) -> tuple[int, int]:
-        """A split's two targets. Raises ``ValueError`` for any other move."""
-        if self.move_type is not MoveType.SPLIT or self.target2 is None:
-            raise ValueError(f"a {self.move_type.value} move has no split targets")
-        return self.target, self.target2
-
-    @property
-    def merge_sources(self) -> tuple[int, int]:
-        """A merge's two sources. Raises ``ValueError`` for any other move."""
-        if self.move_type is not MoveType.MERGE or self.source2 is None:
-            raise ValueError(f"a {self.move_type.value} move has no merge sources")
-        return self.source, self.source2
+    def notation(self) -> str:
+        raise NotImplementedError
 
     @property
     def squares(self) -> tuple[int, ...]:
-        return tuple(
-            s for s in (self.source, self.source2, self.target, self.target2) if s is not None
-        )
-
-    def notation(self) -> str:
-        if self.move_type is MoveType.SPLIT:
-            t1, t2 = self.split_targets
-            return f"{square_name(self.source)}^{square_name(t1)}{square_name(t2)}"
-        if self.move_type is MoveType.MERGE:
-            s1, s2 = self.merge_sources
-            return f"{square_name(s1)}{square_name(s2)}^{square_name(self.target)}"
-        promo = PIECE_SYMBOLS[self.promotion] if self.promotion is not None else ""
-        return square_name(self.source) + square_name(self.target) + promo
+        raise NotImplementedError
 
     def __str__(self) -> str:
         return self.notation()
 
-    @classmethod
-    def parse(cls, text: str) -> QuantumMove:
-        text = text.strip()
-        try:
-            if "^" in text:
-                left, right = text.split("^")
-                if len(left) == 2 and len(right) == 4:
-                    return cls.split(
-                        parse_square(left), parse_square(right[:2]), parse_square(right[2:])
-                    )
-                if len(left) == 4 and len(right) == 2:
-                    return cls.merge(
-                        parse_square(left[:2]), parse_square(left[2:]), parse_square(right)
-                    )
-            elif len(text) in (4, 5):
-                promo = None
-                if len(text) == 5:
-                    if text[4] not in "nbrq":
-                        raise ValueError
-                    promo = PIECE_SYMBOLS.index(text[4])
-                return cls.jump(parse_square(text[:2]), parse_square(text[2:4]), promo)
-        except ValueError:
-            pass
-        raise ValueError(f"invalid quantum move notation: {text!r}")
+
+@dataclass(frozen=True)
+class Jump(_Move):
+    """An ordinary move: one piece from ``source`` to ``target``, sliding or capturing."""
+
+    source: int
+    target: int
+    promotion: Optional[int] = None  # piece kind a pawn promotes to (queen if None)
+
+    @property
+    def squares(self) -> tuple[int, ...]:
+        return self.source, self.target
+
+    def notation(self) -> str:
+        promo = PIECE_SYMBOLS[self.promotion] if self.promotion is not None else ""
+        return square_name(self.source) + square_name(self.target) + promo
+
+
+@dataclass(frozen=True)
+class Split(_Move):
+    """Send the piece on ``source`` to two empty squares at once."""
+
+    source: int
+    target: int
+    target2: int
+
+    @property
+    def targets(self) -> tuple[int, int]:
+        return self.target, self.target2
+
+    @property
+    def squares(self) -> tuple[int, ...]:
+        return self.source, self.target, self.target2
+
+    def notation(self) -> str:
+        return f"{square_name(self.source)}^{square_name(self.target)}{square_name(self.target2)}"
+
+
+@dataclass(frozen=True)
+class Merge(_Move):
+    """Recombine two parts of the same piece onto one empty square."""
+
+    source: int
+    source2: int
+    target: int
+
+    @property
+    def sources(self) -> tuple[int, int]:
+        return self.source, self.source2
+
+    @property
+    def squares(self) -> tuple[int, ...]:
+        return self.source, self.source2, self.target
+
+    def notation(self) -> str:
+        return f"{square_name(self.source)}{square_name(self.source2)}^{square_name(self.target)}"
+
+
+QuantumMove = Union[Jump, Split, Merge]
+"""Any move. Tell the kinds apart with ``isinstance`` (or ``match``)."""
+
+
+def parse_move(text: str) -> QuantumMove:
+    """Read a move from its notation. Raises ``ValueError`` if it isn't valid notation."""
+    text = text.strip()
+    try:
+        if "^" in text:
+            left, right = text.split("^")
+            if len(left) == 2 and len(right) == 4:
+                return Split(parse_square(left), parse_square(right[:2]), parse_square(right[2:]))
+            if len(left) == 4 and len(right) == 2:
+                return Merge(parse_square(left[:2]), parse_square(left[2:]), parse_square(right))
+        elif len(text) in (4, 5):
+            promo = None
+            if len(text) == 5:
+                if text[4] not in "nbrq":
+                    raise ValueError
+                promo = PIECE_SYMBOLS.index(text[4])
+            return Jump(parse_square(text[:2]), parse_square(text[2:4]), promo)
+    except ValueError:
+        pass
+    raise ValueError(f"invalid quantum move notation: {text!r}")
 
 
 # --- Unitaries ----------------------------------------------------------------------

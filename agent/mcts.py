@@ -31,7 +31,7 @@ import numpy as np
 from agent.heuristics import PIECE_VALUES, win_probability
 from engine.bitboard import KING, WHITE
 from engine.board import QuantumBoard
-from engine.moves import MoveType, QuantumMove
+from engine.moves import Jump, QuantumMove
 
 
 @dataclass
@@ -195,7 +195,7 @@ class MCTSAgent:
         jumps: list[QuantumMove] = []
         quantum: list[QuantumMove] = []
         for move in moves:
-            if move.move_type is not MoveType.JUMP:
+            if not isinstance(move, Jump):
                 quantum.append(move)
                 continue
             target = sim.piece_at(move.target)
@@ -259,7 +259,7 @@ class MCTSAgent:
         jumps: list[QuantumMove] = []
         quantum: list[QuantumMove] = []
         for move in legal:
-            if move.move_type is not MoveType.JUMP:
+            if not isinstance(move, Jump):
                 quantum.append(move)
                 continue
             target = sim.piece_at(move.target)
@@ -282,7 +282,7 @@ class MCTSAgent:
     def _immediate_win(board: QuantumBoard, moves: list[QuantumMove]) -> Optional[QuantumMove]:
         """A capture of the enemy king that succeeds with certainty, if there is one."""
         for move in moves:
-            if move.move_type is not MoveType.JUMP:
+            if not isinstance(move, Jump):
                 continue
             target = board.piece_at(move.target)
             if target is None or target.kind != KING or target.color == board.turn:

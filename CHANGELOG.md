@@ -17,6 +17,9 @@ are taken from its section here (see CONTRIBUTING.md, *Releasing*).
   pre-commit configuration runs the same checks before each commit.
 
 ### Changed
+- Moves are explicit types in the engine: `Jump`, `Split` and `Merge` in `engine/moves.py`, each
+  with only the fields it uses. `QuantumMove` is their union, and `parse_move` reads notation
+  (formerly `QuantumMove.parse`). `MoveType` is gone; use `isinstance`.
 - The UI's game flow moved out of `App.tsx` into hooks (`useGame`, `useAi`, `useTutorial`,
   `useOnline`). Nothing changes for players.
 - Dependabot groups minor and patch updates into one weekly pull request per ecosystem.
@@ -26,7 +29,7 @@ are taken from its section here (see CONTRIBUTING.md, *Releasing*).
 - The API reported version 0.6.0; it now reports the release version.
 - The move log's colour dots are announced by screen readers.
 - All 60 type errors mypy found. They were no bugs at runtime, but they hid the engine's
-  assumptions, e.g. that a split always has two targets (now `QuantumMove.split_targets`).
+  assumptions, e.g. that a split always has two targets.
 - Links point at the renamed repository (`Quantum-Chess-Engine`).
 
 ## [0.8.2] - 2026-10-12
