@@ -7,7 +7,7 @@ import pytest
 from engine.bitboard import KNIGHT, WHITE, parse_square
 from engine.board import IllegalMoveError, QuantumBoard
 from engine.classical import Piece
-from engine.moves import MoveType, QuantumMove, merge_ops, split_ops
+from engine.moves import Jump, Merge, Split, merge_ops, parse_move, split_ops
 from engine.register import QuantumRegister
 
 # White knight on b1, kings far away, black to make waiting moves with the king.
@@ -27,19 +27,19 @@ def p(board: QuantumBoard, name: str) -> float:
 
 @pytest.mark.parametrize("text", ["e2e4", "e7e8q", "b1^a3c3", "a3c3^b1"])
 def test_notation_roundtrip(text):
-    assert QuantumMove.parse(text).notation() == text
+    assert parse_move(text).notation() == text
 
 
 def test_notation_types():
-    assert QuantumMove.parse("b1^a3c3").move_type is MoveType.SPLIT
-    assert QuantumMove.parse("a3c3^b1").move_type is MoveType.MERGE
-    assert QuantumMove.parse("b1c3").move_type is MoveType.JUMP
+    assert parse_move("b1^a3c3") == Split(sq("b1"), sq("a3"), sq("c3"))
+    assert parse_move("a3c3^b1") == Merge(sq("a3"), sq("c3"), sq("b1"))
+    assert parse_move("b1c3") == Jump(sq("b1"), sq("c3"))
 
 
 @pytest.mark.parametrize("text", ["", "b1^a3", "a3^b1c3d4", "e2e4k", "z9a1"])
 def test_bad_notation(text):
     with pytest.raises(ValueError):
-        QuantumMove.parse(text)
+        parse_move(text)
 
 
 # --- Gates in isolation ----------------------------------------------------------
@@ -129,7 +129,7 @@ def test_split_cap_follows_constant(monkeypatch):
     board = QuantumBoard(KNIGHT_FEN)
     board.do_move("b1^a3c3")
     board.do_move("e8d8")
-    splits = [m for m in board.legal_moves() if m.move_type is MoveType.SPLIT]
+    splits = [m for m in board.legal_moves() if isinstance(m, Split)]
     assert splits and all(m.source == sq("e1") for m in splits)  # only the whole king
 
 
