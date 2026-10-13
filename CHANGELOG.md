@@ -6,6 +6,8 @@ are taken from its section here (see CONTRIBUTING.md, *Releasing*).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-13
+
 ### Added
 - `pyproject.toml` is a full package definition: dependencies, the extras `desktop`, `bundle`
   (PyInstaller) and `dev`, and the commands `quantum-chess` (the desktop app),
@@ -106,7 +108,8 @@ The first release.
 - Online games with a friend, and a desktop app for Windows and macOS.
 - Multi-level splits, check warnings and draw rules.
 
-[Unreleased]: https://github.com/Andreas-Erick/Quantum-Chess-Engine/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/Andreas-Erick/Quantum-Chess-Engine/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Andreas-Erick/Quantum-Chess-Engine/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/Andreas-Erick/Quantum-Chess-Engine/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/Andreas-Erick/Quantum-Chess-Engine/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/Andreas-Erick/Quantum-Chess-Engine/compare/v0.7.0...v0.8.0
