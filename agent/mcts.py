@@ -31,7 +31,19 @@ import numpy as np
 from agent.heuristics import PIECE_VALUES, win_probability
 from engine.bitboard import KING, WHITE
 from engine.board import QuantumBoard
+from engine.classical import Piece
 from engine.moves import Jump, QuantumMove
+
+# Move ordering tries king captures before any other capture.
+KING_ORDER_VALUE = 100.0
+
+
+def _capture_target(board: QuantumBoard, move: QuantumMove) -> Optional[Piece]:
+    """The enemy piece ``move`` would capture if it is there, or None for a non-capture."""
+    if not isinstance(move, Jump):
+        return None
+    target = board.piece_at(move.target)
+    return target if target is not None and target.color != board.turn else None
 
 
 @dataclass
@@ -195,15 +207,14 @@ class MCTSAgent:
         jumps: list[QuantumMove] = []
         quantum: list[QuantumMove] = []
         for move in moves:
-            if not isinstance(move, Jump):
-                quantum.append(move)
-                continue
-            target = sim.piece_at(move.target)
-            if target is not None and target.color != sim.turn:
-                value = 100.0 if target.kind == KING else PIECE_VALUES[target.kind]
+            target = _capture_target(sim, move)
+            if target is not None:
+                value = KING_ORDER_VALUE if target.kind == KING else PIECE_VALUES[target.kind]
                 captures.append((value * sim.probability(move.target), move))
-            else:
+            elif isinstance(move, Jump):
                 jumps.append(move)
+            else:
+                quantum.append(move)
         rng.shuffle(jumps)
         rng.shuffle(quantum)
         ordered = [m for _, m in sorted(captures, key=lambda c: -c[0])]
@@ -259,16 +270,15 @@ class MCTSAgent:
         jumps: list[QuantumMove] = []
         quantum: list[QuantumMove] = []
         for move in legal:
-            if not isinstance(move, Jump):
-                quantum.append(move)
-                continue
-            target = sim.piece_at(move.target)
-            if target is not None and target.color != sim.turn:
+            target = _capture_target(sim, move)
+            if target is not None:
                 if target.kind == KING:
                     return move
                 captures.append(move)
-            else:
+            elif isinstance(move, Jump):
                 jumps.append(move)
+            else:
+                quantum.append(move)
         if captures and rng.random() < self.capture_bias:
             return rng.choice(captures)
         if quantum and (not jumps or rng.random() < self.quantum_rate):
@@ -282,10 +292,8 @@ class MCTSAgent:
     def _immediate_win(board: QuantumBoard, moves: list[QuantumMove]) -> Optional[QuantumMove]:
         """A capture of the enemy king that succeeds with certainty, if there is one."""
         for move in moves:
-            if not isinstance(move, Jump):
-                continue
-            target = board.piece_at(move.target)
-            if target is None or target.kind != KING or target.color == board.turn:
+            target = _capture_target(board, move)
+            if target is None or target.kind != KING:
                 continue
             trial = board.copy()
             if trial.do_move(move).winner == board.turn and not trial.history[-1].measurements:

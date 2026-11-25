@@ -120,8 +120,8 @@ def test_live_feed_unsubscribes_on_disconnect():
     game_id = client.post("/init").json()["game_id"]
     with client.websocket_connect(f"/ws?game_id={game_id}") as feed:
         feed.receive_json()
-        assert len(store.get(game_id).subscribers) == 1
-    assert store.get(game_id).subscribers == []
+        assert store.get(game_id).feed_count == 1
+    assert store.get(game_id).feed_count == 0
     assert client.post("/do_move", json={"game_id": game_id, "notation": "e2e4"}).status_code == 200
 
 

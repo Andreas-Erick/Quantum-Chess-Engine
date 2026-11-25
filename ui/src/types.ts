@@ -25,7 +25,9 @@ export interface HistoryEntry {
   outcomes: boolean[];
 }
 
-export type LevelName = "easy" | "medium" | "hard";
+/** The AI levels, as agent/levels.py names them (tests/test_contract.py checks). */
+export const LEVEL_NAMES = ["easy", "medium", "hard"] as const;
+export type LevelName = (typeof LEVEL_NAMES)[number];
 
 export interface LevelInfo {
   name: LevelName;

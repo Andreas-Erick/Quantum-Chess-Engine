@@ -16,19 +16,14 @@ import math
 from engine.bitboard import (
     BISHOP,
     KING,
-    KING_ATTACKS,
     KNIGHT,
-    KNIGHT_ATTACKS,
     PAWN,
-    PAWN_ATTACKS,
     QUEEN,
     ROOK,
     WHITE,
-    bishop_attacks,
     file_of,
     iter_squares,
     rank_of,
-    rook_attacks,
 )
 from engine.board import QuantumBoard
 
@@ -57,29 +52,6 @@ def _centrality(sq: int) -> float:
     return 0.0
 
 
-def attacks(board: QuantumBoard, sq: int) -> int:
-    """Squares the piece on ``sq`` attacks, own pieces included (so defence counts).
-
-    Like the engine's slides, only certainly occupied squares block a line.
-    """
-    piece = board.piece_at(sq)
-    if piece is None:
-        return 0
-    if piece.kind == PAWN:
-        return PAWN_ATTACKS[piece.color][sq]
-    if piece.kind == KNIGHT:
-        return KNIGHT_ATTACKS[sq]
-    if piece.kind == KING:
-        return KING_ATTACKS[sq]
-    blockers = board._certainly_occupied()
-    result = 0
-    if piece.kind in (BISHOP, QUEEN):
-        result |= bishop_attacks(sq, blockers)
-    if piece.kind in (ROOK, QUEEN):
-        result |= rook_attacks(sq, blockers)
-    return result
-
-
 def best_capture(board: QuantumBoard) -> float:
     """Expected material the side to move wins with its best single capture, in pawns.
 
@@ -94,7 +66,7 @@ def best_capture(board: QuantumBoard) -> float:
         value = KING_THREAT_VALUE if piece.kind == KING else PIECE_VALUES[piece.kind]
         p = board.probability(src)
         table = cheapest[piece.color]
-        for target in iter_squares(attacks(board, src)):
+        for target in iter_squares(board.attacks(src)):
             if target not in table or value < table[target][0]:
                 table[target] = (value, p)
 

@@ -23,7 +23,8 @@ export function describe(m: MeasurementInfo): string {
   return `${m.squares[0]} occupied? (${percent(m.probability)}) → ${m.outcome ? "yes" : "no"}${chain}`;
 }
 
-export function MoveLog({ entries }: { entries: LogEntry[] }) {
+/** The moves played so far; `toMove` is the side to move, named while nothing has been played. */
+export function MoveLog({ entries, toMove }: { entries: LogEntry[]; toMove: Color }) {
   const list = useRef<HTMLOListElement>(null);
   // Keep the newest move in view by scrolling the list itself, not the page. The block body
   // matters: an effect must not return anything but a cleanup function.
@@ -34,7 +35,7 @@ export function MoveLog({ entries }: { entries: LogEntry[] }) {
   }, [entries.length]);
 
   if (entries.length === 0) {
-    return <p className="muted">No moves yet. White to play.</p>;
+    return <p className="muted">No moves yet. {toMove === "white" ? "White" : "Black"} to play.</p>;
   }
   return (
     <ol className="log" ref={list}>

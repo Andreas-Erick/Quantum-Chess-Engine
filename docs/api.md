@@ -23,6 +23,8 @@ For how the server fits with the engine and the UI, see [architecture.md](archit
 | `GET` | `/health` | Liveness probe |
 
 Move notation: `e2e4` (jump), `e7e8q` (promotion), `b1^a3c3` (split), `a3c3^b1` (merge).
+`/do_move` also accepts a bare promotion (`e7e8`) as a queen; the history records it as
+`e7e8q`, and `/legal_moves` lists only the spelled-out forms.
 
 ## Responses
 

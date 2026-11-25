@@ -28,9 +28,10 @@ Rules in this phase:
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from itertools import combinations
-from typing import Optional
+from typing import Optional, Union
 
 from engine.bitboard import (
     BETWEEN,
@@ -88,6 +89,41 @@ class IllegalMoveError(ValueError):
     pass
 
 
+class ReplayError(ValueError):
+    """A recorded game that does not replay: ``ply`` (1-based) is the first move that differs."""
+
+    def __init__(self, ply: int, notation: str, reason: str) -> None:
+        super().__init__(f"history does not replay at move {ply} ({notation}): {reason}")
+        self.ply = ply
+        self.notation = notation
+        self.reason = reason
+
+
+# A recorded move: its notation, its measurement outcomes, and optionally whether it executed.
+Record = Union[tuple[str, Sequence[bool]], tuple[str, Sequence[bool], bool]]
+
+# Castling, per side: (right, rook's file, king's destination file, rook's destination file).
+_CASTLING_SIDES = {
+    WHITE: ((WHITE_KINGSIDE, 7, 6, 5), (WHITE_QUEENSIDE, 0, 2, 3)),
+    BLACK: ((BLACK_KINGSIDE, 7, 6, 5), (BLACK_QUEENSIDE, 0, 2, 3)),
+}
+
+
+def _piece_attacks(sq: int, kind: int, blockers: int) -> int:
+    """Squares a knight, bishop, rook, queen or king on ``sq`` attacks, lines stopping at
+    ``blockers``. Pawns differ between attacking and moving, so their callers handle them."""
+    if kind == KNIGHT:
+        return KNIGHT_ATTACKS[sq]
+    if kind == KING:
+        return KING_ATTACKS[sq]
+    attacks = 0
+    if kind in (BISHOP, QUEEN):
+        attacks |= bishop_attacks(sq, blockers)
+    if kind in (ROOK, QUEEN):
+        attacks |= rook_attacks(sq, blockers)
+    return attacks
+
+
 @dataclass
 class MoveResult:
     move: QuantumMove
@@ -114,7 +150,7 @@ class QuantumBoard:
         self.fullmove_number = classical.fullmove_number
         self.halfmove_clock = classical.halfmove_clock
         self.register = QuantumRegister()
-        self.resolver = ProbabilityResolver(rng)
+        self._resolver = ProbabilityResolver(rng)
         self.winner: Optional[int] = None
         self.draw_reason: Optional[str] = None
         self.history: list[MoveResult] = []
@@ -130,7 +166,7 @@ class QuantumBoard:
         clone.fullmove_number = self.fullmove_number
         clone.halfmove_clock = self.halfmove_clock
         clone.register = self.register.copy()
-        clone.resolver = ProbabilityResolver(rng)
+        clone._resolver = ProbabilityResolver(rng)
         clone.winner = self.winner
         clone.draw_reason = self.draw_reason
         clone.history = list(self.history)
@@ -139,20 +175,56 @@ class QuantumBoard:
 
     @classmethod
     def replay(
-        cls, fen: str, records: list[tuple[str, list[bool]]], rng: Optional[RandomSource] = None
+        cls,
+        fen: str,
+        records: Iterable[Record],
+        rng: Optional[RandomSource] = None,
+        *,
+        check_dice: bool = False,
     ) -> QuantumBoard:
         """Rebuild a game from its moves and their measurement outcomes.
 
-        Because outcomes are recorded, the replay reproduces the exact quantum state, so a
-        client that only sees the JSON history can reconstruct the board.
+        By default the recorded outcomes are *forced*, so the replay reproduces the exact
+        quantum state: a client that only sees the JSON history can reconstruct the board.
+        ``rng`` then rolls the dice for moves played after the replay.
+
+        With ``check_dice``, the outcomes are rolled by ``rng`` instead and must match the
+        record, which checks that those dice produced the game (see api/fairness.py).
+
+        Either way a record that also says whether the move executed is checked against that.
+        Raises :class:`ReplayError` at the first move that differs.
         """
         board = cls(fen, rng=rng)
-        for notation, outcomes in records:
-            board.resolver.forced.extend(outcomes)
-            result = board.do_move(notation)
-            if board.resolver.forced or result.outcomes != list(outcomes):
-                raise ValueError(f"history does not replay at move {notation}")
+        for ply, (notation, outcomes, *executed) in enumerate(records, start=1):
+            if not check_dice:
+                board.force_outcomes(outcomes)
+            try:
+                result = board.do_move(notation)
+            except ValueError as exc:  # IllegalMoveError, or a forced outcome that can't happen
+                raise ReplayError(ply, notation, str(exc)) from exc
+            if result.outcomes != list(outcomes) or board._resolver.forced:
+                raise ReplayError(
+                    ply,
+                    notation,
+                    f"the dice say {result.outcomes}, but the game recorded {list(outcomes)}."
+                    if check_dice
+                    else "the recorded outcomes don't fit this move.",
+                )
+            if executed and result.executed != executed[0]:
+                raise ReplayError(ply, notation, "whether the move executed differs.")
         return board
+
+    # --- Dice ------------------------------------------------------------------------
+
+    def reseed(self, rng: RandomSource) -> None:
+        """Roll every measurement from now on with ``rng`` (for example jointly seeded dice)."""
+        self._resolver.rng = rng
+
+    def force_outcomes(self, outcomes: Iterable[bool]) -> None:
+        """Use these outcomes, in order, for the next measurements instead of rolling.
+
+        A forced outcome that is impossible in the position raises ``ValueError`` when used."""
+        self._resolver.forced.extend(outcomes)
 
     # --- Queries ---------------------------------------------------------------------
 
@@ -264,20 +336,21 @@ class QuantumBoard:
         piece = self.labels[src]
         if piece is None:
             return 0
-        blockers = self._certainly_occupied() if slide else self._labelled()
-        not_own = ~self._certainly_own(piece.color)
         if piece.kind == PAWN:
             return self._pawn_targets(src, piece.color, slide)
-        if piece.kind == KNIGHT:
-            return KNIGHT_ATTACKS[src] & not_own
-        if piece.kind == KING:
-            return KING_ATTACKS[src] & not_own
-        attacks = 0
-        if piece.kind in (BISHOP, QUEEN):
-            attacks |= bishop_attacks(src, blockers)
-        if piece.kind in (ROOK, QUEEN):
-            attacks |= rook_attacks(src, blockers)
-        return attacks & not_own
+        blockers = self._certainly_occupied() if slide else self._labelled()
+        return _piece_attacks(src, piece.kind, blockers) & ~self._certainly_own(piece.color)
+
+    def attacks(self, sq: int) -> int:
+        """Bitboard of squares the piece on ``sq`` attacks, own pieces included (so defence
+        counts). As for slides, only certainly occupied squares block a line. A pawn attacks
+        diagonally only."""
+        piece = self.labels[sq]
+        if piece is None:
+            return 0
+        if piece.kind == PAWN:
+            return PAWN_ATTACKS[piece.color][sq]
+        return _piece_attacks(sq, piece.kind, self._certainly_occupied())
 
     def _pawn_targets(self, src: int, color: int, slide: bool) -> int:
         forward = 8 if color == WHITE else -8
@@ -304,13 +377,8 @@ class QuantumBoard:
         king_sq = square(4, back)
         if self.labels[king_sq] != Piece(color, KING) or not self.is_classical(king_sq):
             return 0
-        sides = (
-            ((WHITE_KINGSIDE, 7, 6), (WHITE_QUEENSIDE, 0, 2))
-            if color == WHITE
-            else ((BLACK_KINGSIDE, 7, 6), (BLACK_QUEENSIDE, 0, 2))
-        )
         targets = 0
-        for flag, rook_file, dest_file in sides:
+        for flag, rook_file, dest_file, _ in _CASTLING_SIDES[color]:
             rook_sq = square(rook_file, back)
             if (
                 self.castling & flag
@@ -320,6 +388,55 @@ class QuantumBoard:
             ):
                 targets |= bit(square(dest_file, back))
         return targets
+
+    @staticmethod
+    def _castling_rook(piece: Piece, move: Jump) -> Optional[tuple[int, int]]:
+        """The rook's (from, to) squares if ``move``, already validated, castles."""
+        back = 0 if piece.color == WHITE else 7
+        if piece.kind != KING or move.source != square(4, back):
+            return None
+        for _, rook_file, dest_file, rook_dest_file in _CASTLING_SIDES[piece.color]:
+            if move.target == square(dest_file, back):
+                return square(rook_file, back), square(rook_dest_file, back)
+        return None
+
+    # --- Move generation -------------------------------------------------------------
+    #
+    # Each kind of move has one generator, which says where a piece may go. Both
+    # legal_moves and validate ask them, so the two can't disagree.
+
+    def _jump_targets(self, src: int, piece: Piece) -> int:
+        reach = self.reachable(src)
+        if piece.kind == KING:
+            reach |= self._castling_targets(piece.color)
+        return reach
+
+    def _split_targets(self, src: int, piece: Piece) -> list[int]:
+        """Empty squares the piece on ``src`` can split onto; none for a pawn, or a piece too
+        uncertain to split again."""
+        if piece.kind == PAWN or not self.can_split(src):
+            return []
+        strict = self.reachable(src, slide=False)
+        return [t for t in iter_squares(strict) if self.labels[t] is None]
+
+    def _merge_targets(self, s1: int, s2: int) -> list[int]:
+        """Empty squares two superposed parts of the same non-pawn piece can merge onto."""
+        piece = self.labels[s1]
+        if (
+            piece is None
+            or piece.kind == PAWN
+            or s1 == s2
+            or self.labels[s2] != piece
+            or self.is_classical(s1)
+            or self.is_classical(s2)
+        ):
+            return []
+        common = self.reachable(s1, slide=False) & self.reachable(s2, slide=False)
+        return [t for t in iter_squares(common) if self.labels[t] is None]
+
+    @staticmethod
+    def _promotes(piece: Piece, target: int) -> bool:
+        return piece.kind == PAWN and rank_of(target) in (0, 7)
 
     # --- Validation & generation -----------------------------------------------------
 
@@ -338,20 +455,20 @@ class QuantumBoard:
         return piece
 
     def validate(self, move: QuantumMove) -> None:
+        """Raise :class:`IllegalMoveError`, saying why, unless ``move`` is in
+        :meth:`legal_moves`. A promotion must name its piece (``e7e8q``); :meth:`do_move` also
+        accepts ``e7e8`` as shorthand for a queen."""
         if self.is_over:
             raise IllegalMoveError("the game is over")
         piece = self._own_piece(move.source)
 
         if isinstance(move, Jump):
-            reach = self.reachable(move.source)
-            if piece.kind == KING:
-                reach |= self._castling_targets(piece.color)
-            if not reach & bit(move.target):
+            if not self._jump_targets(move.source, piece) & bit(move.target):
                 raise IllegalMoveError(f"{piece.symbol} cannot move to {square_name(move.target)}")
-            promotes = piece.kind == PAWN and rank_of(move.target) in (0, 7)
-            if move.promotion is not None and (
-                not promotes or move.promotion not in PROMOTION_PIECES
-            ):
+            if self._promotes(piece, move.target):
+                if move.promotion not in PROMOTION_PIECES:
+                    raise IllegalMoveError("a promotion must name its piece, e.g. e7e8q")
+            elif move.promotion is not None:
                 raise IllegalMoveError("invalid promotion")
             return
 
@@ -366,9 +483,9 @@ class QuantumBoard:
                 raise IllegalMoveError(
                     f"{piece.symbol} on {square_name(move.source)} is too uncertain to split again"
                 )
-            reach = self.reachable(move.source, slide=False)
+            targets = self._split_targets(move.source, piece)
             for t in (t1, t2):
-                if not reach & bit(t) or self.labels[t] is not None:
+                if t not in targets:
                     raise IllegalMoveError(f"cannot split onto {square_name(t)}")
             return
 
@@ -377,8 +494,7 @@ class QuantumBoard:
             raise IllegalMoveError("merge needs two parts of the same kind of piece")
         if self.is_classical(s1) or self.is_classical(s2):
             raise IllegalMoveError("both merge sources must be in superposition")
-        common = self.reachable(s1, slide=False) & self.reachable(s2, slide=False)
-        if not common & bit(move.target) or self.labels[move.target] is not None:
+        if move.target not in self._merge_targets(s1, s2):
             raise IllegalMoveError(f"cannot merge onto {square_name(move.target)}")
 
     def legal_moves(self) -> list[QuantumMove]:
@@ -389,25 +505,18 @@ class QuantumBoard:
         for src, piece in enumerate(self.labels):
             if piece is None or piece.color != self.turn:
                 continue
-            reach = self.reachable(src)
-            jumps = reach | (self._castling_targets(piece.color) if piece.kind == KING else 0)
-            for dst in iter_squares(jumps):
-                if piece.kind == PAWN and rank_of(dst) in (0, 7):
+            for dst in iter_squares(self._jump_targets(src, piece)):
+                if self._promotes(piece, dst):
                     moves.extend(Jump(src, dst, p) for p in PROMOTION_PIECES)
                 else:
                     moves.append(Jump(src, dst))
-            if piece.kind == PAWN:
-                continue
-            if self.can_split(src):
-                strict = self.reachable(src, slide=False)
-                empty = [t for t in iter_squares(strict) if self.labels[t] is None]
-                moves.extend(Split(src, a, b) for a, b in combinations(empty, 2))
-            if not self.is_classical(src):
+            targets = self._split_targets(src, piece)
+            moves.extend(Split(src, a, b) for a, b in combinations(targets, 2))
+            if piece.kind != PAWN and not self.is_classical(src):
                 superposed.setdefault(piece, []).append(src)
         for squares in superposed.values():
             for a, b in combinations(squares, 2):
-                common = self.reachable(a, slide=False) & self.reachable(b, slide=False)
-                moves.extend(Merge(a, b, t) for t in iter_squares(common) if self.labels[t] is None)
+                moves.extend(Merge(a, b, t) for t in self._merge_targets(a, b))
         return moves
 
     # --- Execution -------------------------------------------------------------------
@@ -415,6 +524,7 @@ class QuantumBoard:
     def do_move(self, move: QuantumMove | str) -> MoveResult:
         if isinstance(move, str):
             move = parse_move(move)
+        move = self._with_default_promotion(move)
         self.validate(move)
         mover = self._piece(move.source)
 
@@ -444,6 +554,14 @@ class QuantumBoard:
         self.history.append(result)
         return result
 
+    def _with_default_promotion(self, move: QuantumMove) -> QuantumMove:
+        """``e7e8`` means ``e7e8q``. Spelled out, so the history records the piece."""
+        if isinstance(move, Jump) and move.promotion is None:
+            piece = self.labels[move.source]
+            if piece is not None and self._promotes(piece, move.target):
+                return Jump(move.source, move.target, QUEEN)
+        return move
+
     def _activate(self, sq: int) -> None:
         if sq not in self.register:
             self.register.add(sq, self.labels[sq] is not None)
@@ -458,7 +576,7 @@ class QuantumBoard:
         self._release(self.register.release_definite())
 
     def _measure(self, sq: int) -> Measurement:
-        measurement = self.resolver.measure(self.register, sq)
+        measurement = self._resolver.measure(self.register, sq)
         self._release(measurement.collapsed)
         return measurement
 
@@ -485,16 +603,9 @@ class QuantumBoard:
         piece = self._piece(src)
         result = MoveResult(move, executed=False)
 
-        if piece.kind == KING and abs(tgt - src) == 2:
-            back = rank_of(src)
-            rook_from, rook_to = (
-                (square(7, back), square(5, back))
-                if tgt > src
-                else (
-                    square(0, back),
-                    square(3, back),
-                )
-            )
+        castling = self._castling_rook(piece, move)
+        if castling is not None:
+            rook_from, rook_to = castling
             self.labels[rook_to], self.labels[rook_from] = self.labels[rook_from], None
             self.labels[tgt], self.labels[src] = piece, None
             result.executed = True
@@ -549,7 +660,7 @@ class QuantumBoard:
         return path
 
     def _measure_path(self, path: list[int]) -> PathMeasurement:
-        measurement = self.resolver.measure_path(self.register, path)
+        measurement = self._resolver.measure_path(self.register, path)
         self._release(measurement.collapsed)
         return measurement
 
@@ -561,8 +672,8 @@ class QuantumBoard:
         """
         src, tgt = move.source, move.target
         piece = self._piece(src)
-        if piece.kind == PAWN and rank_of(tgt) in (0, 7):
-            piece = Piece(piece.color, move.promotion if move.promotion is not None else QUEEN)
+        if move.promotion is not None:  # validate allows one only on a promoting pawn move
+            piece = Piece(piece.color, move.promotion)
         if self.is_classical(src) and not path:
             self.labels[tgt], self.labels[src] = piece, None
             return

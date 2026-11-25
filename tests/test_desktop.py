@@ -92,7 +92,9 @@ def test_network_guests_can_play_but_not_start_games(host_app, tmp_path):
     assert httpx.post(f"{lan}/online/join", json={"game_id": game_id}).is_success
     assert httpx.get(f"{lan}/state", params={"game_id": game_id}).is_success
     for path in ("/init", "/init/", "/%69nit", "/ai_move", "/online/create", "/online/%63reate"):
-        response = httpx.post(f"{lan}{path}", json={"game_id": game_id})
+        # The guard is on the route itself, so every spelling that reaches it (after a
+        # trailing-slash redirect, say) is refused there.
+        response = httpx.post(f"{lan}{path}", json={"game_id": game_id}, follow_redirects=True)
         assert response.status_code == 403, path
         assert "Only the host" in response.json()["detail"]
     assert httpx.post(f"{url}/init", json={}).is_success  # the host still can

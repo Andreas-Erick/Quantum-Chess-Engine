@@ -73,11 +73,11 @@ def test_measurement_resets_the_clock():
     board = QuantumBoard("4k3/8/8/8/8/8/8/1N2K3 w - - 40 1", rng=None)
     board.do_move("b1^a3c3")
     assert board.halfmove_clock == 41  # quantum moves are reversible: no reset
-    board.resolver.forced.append(False)
+    board.force_outcomes([False])
     board.do_move("e8e7")
     board.do_move("c3e4")  # moves with its uncertainty, no measurement
     assert board.halfmove_clock == 43
-    board.resolver.forced.append(True)
+    board.force_outcomes([True])
     board.do_move("e7e6")
     board.do_move("e1e2")
     board.do_move("e6e5")

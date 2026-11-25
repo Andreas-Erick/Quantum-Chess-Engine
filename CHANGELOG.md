@@ -6,6 +6,29 @@ are taken from its section here (see CONTRIBUTING.md, *Releasing*).
 
 ## [Unreleased]
 
+### Changed
+- Move legality has one definition in the engine: `validate` and `legal_moves` ask the same
+  per-move generators, and a test checks that a move is valid exactly when it is listed.
+  `QuantumBoard.attacks` is public, and the AI's evaluation uses it.
+- A bare promotion (`e7e8`) is recorded as `e7e8q`. It was accepted before but never listed in
+  `/legal_moves`.
+- The board owns its dice: `reseed`, `force_outcomes`, and one `replay` that either forces the
+  recorded outcomes or rolls them (`check_dice=True`), checks whether each move executed, and
+  raises `ReplayError` naming the first move that differs. `api.fairness.verify` uses it.
+  `QuantumBoard.resolver` is private.
+- The server's games live in `api/games.py`: `Game` enforces turns, seats, dice seeding and
+  live feeds itself, and the routes only map its errors to status codes.
+- The API decides what guests may do: host-only routes depend on `host_only`, and the desktop
+  app's `GuestsOnly` only marks requests as guests'. `HOST_ONLY_PATHS` is gone.
+- Link formats live in `api/links.py` and `ui/src/links.ts`.
+- The UI opens every game through `useGame().open`, and decides whose move it is in
+  `ui/src/turns.ts`.
+
+### Fixed
+- Online play in a browser that blocks storage (a private window, say): the seat was read back
+  from storage after creating or joining a game, so the player could not move.
+- The move log said "White to play" in positions where Black moves first.
+
 ## [0.9.0] - 2026-10-13
 
 ### Added

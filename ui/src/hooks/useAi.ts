@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { storage } from "../storage";
+import { isOver } from "../turns";
 import type { Color, LevelInfo, LevelName } from "../types";
-import { type Game, isOver } from "./useGame";
+import type { Game } from "./useGame";
 
 /**
  * The AI opponent: which colour it plays, how strong it is, and its moves. It only plays while

@@ -1,7 +1,7 @@
 // Per-browser conveniences in localStorage. Every access may throw (private windows, blocked
 // storage), and the app must work without it: a game just won't resume after a reload.
 
-import type { LevelName, Seat } from "./types";
+import { LEVEL_NAMES, type LevelName, type Seat } from "./types";
 
 const GAME_KEY = "quantum-chess:game-id";
 const LEVEL_KEY = "quantum-chess:level";
@@ -30,7 +30,7 @@ export const storage = {
 
   level: (): LevelName | null => {
     const stored = read(LEVEL_KEY);
-    return stored === "easy" || stored === "medium" || stored === "hard" ? stored : null;
+    return LEVEL_NAMES.find((name) => name === stored) ?? null;
   },
   setLevel: (level: LevelName) => write(LEVEL_KEY, level),
 
