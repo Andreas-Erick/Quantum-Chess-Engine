@@ -5,3 +5,7 @@
 *.png binary
 *.ico binary
 *.icns binary
+
+# Generated lock files: collapsed in diffs and left out of the language statistics.
+requirements*.lock linguist-generated=true
+ui/package-lock.json linguist-generated=true

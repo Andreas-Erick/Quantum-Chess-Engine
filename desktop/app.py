@@ -28,6 +28,7 @@ import socket
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlsplit
@@ -73,9 +74,17 @@ def lan_address() -> str:
             return "127.0.0.1"
 
 
+@dataclass(frozen=True)
+class BackgroundServer:
+    """A uvicorn server running on its own thread, as ``start_server`` returns it."""
+
+    server: Any  # uvicorn.Server; uvicorn is imported only when a server starts
+    thread: threading.Thread
+
+
 def start_server(
     host: str, port: int, app: Any = None, ui_dir: Optional[Path] = None, timeout: float = 30.0
-):
+) -> BackgroundServer:
     """Serve ``app`` (by default a new API + UI app) from a background thread; returns the
     uvicorn server once it listens. Several servers can share one app, and so its games."""
     import uvicorn
@@ -89,20 +98,19 @@ def start_server(
     )
     server = uvicorn.Server(config)
     thread = threading.Thread(target=server.run, name=f"server-{host}:{port}", daemon=True)
-    server.thread = thread  # type: ignore[attr-defined]  # read by stop_server
     thread.start()
     deadline = time.monotonic() + timeout
     while not server.started:
         if not thread.is_alive() or time.monotonic() > deadline:
             raise RuntimeError(f"the engine did not start on {host}:{port}")
         time.sleep(0.05)
-    return server
+    return BackgroundServer(server, thread)
 
 
-def stop_server(server: Any, timeout: float = 5.0) -> None:
+def stop_server(running: BackgroundServer, timeout: float = 5.0) -> None:
     """Stop a server from ``start_server``; returns once it has let go of its port."""
-    server.should_exit = True
-    server.thread.join(timeout)
+    running.server.should_exit = True
+    running.thread.join(timeout)
 
 
 class GuestsOnly:
@@ -218,7 +226,7 @@ class Desktop:
         self._app = app
         self._local_url = local_url
         self._home_url = local_url or start_url
-        self._lan_server: Any = None
+        self._lan_server: Optional[BackgroundServer] = None
         self._lan_url: Optional[str] = None
         self._tunnel: Any = None
         self._joined = joined
