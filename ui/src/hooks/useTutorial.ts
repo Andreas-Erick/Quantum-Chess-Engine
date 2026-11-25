@@ -3,7 +3,7 @@ import { api } from "../api";
 import type { Mode } from "../moves";
 import { storage } from "../storage";
 import { LESSONS, type TutorialProgress } from "../tutorial/lessons";
-import { type Game, setUrlGame } from "./useGame";
+import type { Game } from "./useGame";
 
 const REPLY_DELAY_MS = 600; // let the player see their move before a tutorial reply
 
@@ -14,7 +14,7 @@ const REPLY_DELAY_MS = 600; // let the player see their move before a tutorial r
 export function useTutorial(game: Game, setMode: (mode: Mode) => void) {
   const [progress, setProgress] = useState<TutorialProgress | null>(null);
   const [lessonsDone, setLessonsDone] = useState<string[]>(() => storage.lessonsDone());
-  const { run, showGame, applyResponse } = game;
+  const { run, open, applyResponse } = game;
 
   const step = progress ? LESSONS[progress.lesson].steps[progress.step] : null;
 
@@ -22,10 +22,7 @@ export function useTutorial(game: Game, setMode: (mode: Mode) => void) {
     run(async () => {
       const lesson = LESSONS[index];
       const fresh = await api.init(lesson.fen);
-      setUrlGame(null);
-      game.setNotice(null);
-      game.setFlipped(false);
-      showGame(fresh, []);
+      open(fresh, { remember: false }); // so exit can return to the game played before
       for (const notation of lesson.setup ?? []) applyResponse(await api.move(fresh.game_id, notation));
       setProgress({ lesson: index, step: 0, done: false });
       setMode(lesson.steps[0].mode);
@@ -35,7 +32,7 @@ export function useTutorial(game: Game, setMode: (mode: Mode) => void) {
   const exit = () => {
     setProgress(null);
     const stored = storage.gameId();
-    void run(() => (stored ? game.resume(stored) : game.newGame()));
+    void (stored ? game.resume(stored) : game.newGame());
   };
 
   /** After the player's move: play the lesson's reply and go to the next step, or finish. */

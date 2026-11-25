@@ -30,23 +30,11 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
+
+from api.links import game_id_from_link, seat_fragment
 
 APP_NAME = "Quantum Chess Engine"
-
-# Endpoints the network listener refuses: each starts a game or an AI search on the host's
-# computer, which only the host should be able to do. Guests don't need the API docs either.
-HOST_ONLY_PATHS = frozenset(
-    {
-        "/init",
-        "/ai_move",
-        "/online/create",
-        "/docs",
-        "/docs/oauth2-redirect",
-        "/redoc",
-        "/openapi.json",
-    }
-)
 
 
 def bundle_dir() -> Path:
@@ -118,25 +106,19 @@ def stop_server(server: Any, timeout: float = 5.0) -> None:
 
 
 class GuestsOnly:
-    """The app as other machines see it while this one hosts: they can join, watch and play
-    the host's online games, but not start games or AI searches here (``HOST_ONLY_PATHS``).
-    Anyone on the network can reach the listener, and those would cost the host memory and
-    minutes of CPU per request."""
+    """The app as other machines see it while this one hosts: every request is marked as a
+    guest's. The API then lets guests join, watch and play the host's online games, but not
+    start games or AI searches here (see ``api.server.host_only``): anyone on the network can
+    reach the listener, and those would cost the host memory and minutes of CPU per request."""
 
     def __init__(self, app: Any) -> None:
         self.app = app
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
-        if scope["type"] == "http" and scope["path"].rstrip("/") in HOST_ONLY_PATHS:
-            from starlette.responses import JSONResponse
-
-            detail = "Only the host can start games here. Ask them for an invite link."
-            await JSONResponse({"detail": detail}, status_code=403)(scope, receive, send)
-            return
         if scope["type"] in ("http", "websocket"):
             from api.server import GUEST
 
-            scope = {**scope, GUEST: True}  # online games only (see api.server.GameStore.get)
+            scope = {**scope, GUEST: True}
         await self.app(scope, receive, send)
 
 
@@ -168,12 +150,6 @@ def origin_of(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
-def game_of(url: str) -> Optional[str]:
-    query = parse_qs(urlsplit(url).query)
-    values = query.get("game") or query.get("join")
-    return values[0] if values else None
-
-
 class JoinedGames:
     """The games this app joined, with the seed it contributed to each (data_dir/joined.json)."""
 
@@ -203,7 +179,7 @@ def join_game(link: str, joined: JoinedGames) -> str:
     import httpx
 
     parts = urlsplit(link.strip())
-    game_id = game_of(link.strip())
+    game_id = game_id_from_link(link)
     if parts.scheme not in ("http", "https") or not parts.netloc or not game_id:
         raise ValueError("That doesn't look like an invite link (http://…/?join=…).")
     origin = origin_of(link.strip())
@@ -221,7 +197,7 @@ def join_game(link: str, joined: JoinedGames) -> str:
         raise ValueError(response.json().get("detail", f"joining failed ({response.status_code})"))
     seat = response.json()
     joined.add(origin, game_id, {"color": seat["color"], "seed": seed})
-    return f"{game_url}#seat={seat['color']}.{seat['token']}"
+    return game_url + seat_fragment(seat["color"], seat["token"])
 
 
 class Desktop:
@@ -362,7 +338,7 @@ class Desktop:
         from api.fairness import verify
 
         url = self._window.get_current_url() or ""
-        game_id = game_of(url)
+        game_id = game_id_from_link(url)
         if not game_id:
             message = "Open a finished online game first."
         elif self._on_own_page() or any(

@@ -127,13 +127,13 @@ sequenceDiagram
     Player->>UI: clicks g1, f3, h3 (Split mode)
     UI->>UI: nextSquares / completedMove match the clicks against /legal_moves
     UI->>API: POST /do_move {game_id, notation: "g1^f3h3"}
-    API->>API: store.get(game) · take game.lock · check_turn(token)
+    API->>API: store.get(game) · Game.play: take the lock, check the turn
     API->>Board: do_move("g1^f3h3")
     Board->>Board: validate(move): piece, targets, split rules
     Board->>Reg: add g1, f3, h3 · apply(split_ops)
     Reg-->>Board: released squares (now certain)
     Board-->>API: MoveResult(executed, captured, measurements)
-    API->>API: serialize_result → MoveResponse · publish to /ws feeds
+    API->>API: Game.play: MoveResponse · publish to /ws feeds
     API-->>UI: MoveResponse (new GameState inside)
     UI->>UI: applyResponse: log entry, new state, flash collapsed squares
     UI->>API: GET /legal_moves (next turn) · POST /ai_move
@@ -145,16 +145,19 @@ In code:
    the squares that continue some legal move from `/legal_moves`, and `completedMove` turns the
    clicks into notation once they match exactly one.
 2. **The request** (`ui/src/api.ts` → `POST /do_move`). Online games add the seat token.
-3. **The server** (`api/server.py`, `do_move`) finds the game, holds its lock for the whole move,
-   refuses a move out of turn in an online game, and calls the engine.
+3. **The server** (`api/server.py`, `do_move`) finds the game and calls `Game.play`
+   (`api/games.py`), which holds the game's lock for the whole move, refuses a move out of turn
+   in an online game, and calls the engine.
 4. **The engine** (`engine/board.py`, `QuantumBoard.do_move`):
-   - `validate` checks the move's shape against the possible board, using the classical
-     layer's move patterns.
+   - `validate` checks the move against the possible board. It asks the same per-move
+     generators as `legal_moves` (`_jump_targets`, `_split_targets`, `_merge_targets`), so a move
+     is valid exactly when `legal_moves` lists it (`tests/test_legality.py` checks this). A bare
+     promotion (`e7e8`) is shorthand for a queen and is recorded as `e7e8q`.
    - `_split`, `_merge` or `_jump` add the touched squares to the register, and apply gates or
      measure. `_jump` handles captures, slides and path measurements.
    - After the move, castling rights, the draw clock, the winner and the turn are updated, and
      the `MoveResult` is appended to `history`.
-5. **The response** (`serialize_result`) lists each measurement: what was asked, its prior
+5. **The response** (`serialize_result` in `api/games.py`) lists each measurement: what was asked, its prior
    probability, the outcome, and every square that collapsed. The same message goes to every
    `/ws` subscriber, so a friend's screen updates at once.
 6. **The UI** (`applyResponse`) appends the move log entry, shows the new state, and flashes the
@@ -183,12 +186,21 @@ therefore average over the quantum dice.
 
 - **`schemas.py`** is the JSON contract (Pydantic). Every input has a length limit, and the UI
   mirrors these types in `ui/src/types.ts`.
-- **`server.py`**, `create_app()`, builds the FastAPI app:
+- **`games.py`**: `Game` is one game behind a small interface (`state`, `legal_moves`,
+  `correlations`, `play`, `play_ai`, `seat_host`, `join`, `subscribe`/`unsubscribe`). It enforces
+  the rules of online play itself and raises a `GameError` subclass (`NotYourTurn`,
+  `WaitingForOpponent`, `SeatsTaken`, …) that carries its HTTP status. `tests/test_games.py`
+  tests it without HTTP.
   - `GameStore` keeps at most `QC_MAX_GAMES` (500) games in memory and forgets the least
-    recently used.
-  - Each `Game` has a `threading.Lock`. Every read and move holds it, and an AI search holds it
-    for the whole search (seconds). That's why the WebSocket handler never takes it on the
-    event loop.
+    recently used. `GameStore.get(id, guest)` is the one place that hides the host's own games
+    from guests.
+  - Each `Game` has a private `threading.Lock`. Every method holds it, and an AI search holds
+    it for the whole search (seconds). That's why the WebSocket handler calls `subscribe` and
+    `unsubscribe` from a worker thread, never on the event loop.
+- **`server.py`**, `create_app()`, builds the FastAPI app. Each route looks a game up and calls
+  one `Game` method; an exception handler turns `GameError` into a status code. Routes that
+  only the host may call (they create games or run an AI search) depend on `host_only`, which
+  refuses requests marked as a guest's.
   - **Online games** have two seats, each with a secret token. Moves need the token of the side
     to move, and are refused until both seats are taken.
   - **Live feeds** (`/ws`): a `state` message on connect and when a player joins, and a `move`
@@ -205,13 +217,17 @@ development, Vite serves it on :5173 and proxies API calls to :8000.
 - **`App.tsx`** puts the page together: it picks squares into moves and renders the board and
   panels. The game flow lives in hooks under `hooks/`:
   - `useGame`: the game on screen (state, move log, legal moves, selection) and the plumbing the
-    others share: `run` (busy and error handling), `showGame` and `applyResponse`.
+    others share: `run` (busy and error handling), `open` (the one way a game is put on screen, however it
+    was started, resumed or joined) and `applyResponse`.
   - `useAi`: the AI's colour and strength, and its automatic replies in local games.
   - `useTutorial`: the lesson in progress and the lessons finished.
   - `useOnline`: creating and joining online games, the live feed, desktop hosting, and opening
     the game a link points at when the page loads.
 - **`components/`**: `Board` (rendering only), `MoveLog`, `TutorialCard`, `OnlineCard`.
 - **`moves.ts`**: clicks → move notation, driven entirely by the legal-move list.
+- **`turns.ts`**: who moves next (`mover`: me, the AI, the friend or nobody) and what the
+  status line says while waiting. **`links.ts`**: the `?game=`, `?join=` and `#seat=` formats,
+  shared with `api/links.py`.
 - **`live.ts`**: the `/ws` feed with reconnects. **`storage.ts`**: per-browser state (the
   resumed game, seats and seeds, finished lessons).
 - **`tutorial/lessons.json`**: the seven lessons as data. `tests/test_tutorial.py` replays every
@@ -240,7 +256,7 @@ test for the guard. [SECURITY.md](../SECURITY.md) lists the accepted limitations
 
 | Boundary | Untrusted side | Guard |
 |---|---|---|
-| Hosting listener and tunnel | Anyone with the address | `GuestsOnly` (`desktop/app.py`): refuses `HOST_ONLY_PATHS` (new games, AI searches, docs) and marks requests as guests. Guests see only online games (`GameStore.get(..., guest=True)`). |
+| Hosting listener and tunnel | Anyone with the address | `GuestsOnly` (`desktop/app.py`) marks every request as a guest's. The API then refuses guests the routes that depend on `host_only` (new games, AI searches) and the docs, and shows them only online games (`GameStore.get(..., guest=True)`). |
 | The app's local server | Web pages in the player's browser | `LocalOnly`: answers only requests addressed to `127.0.0.1`/`localhost` on its port (DNS rebinding). |
 | The desktop bridge | A host's page, after joining | Methods that act on the machine check `_on_own_page()`. Only intended methods are public, and a test pins the list. The window is sent home from pages the app didn't open (`_check_page`). |
 | Online moves | The other player and spectators | Seat tokens, compared in constant time. Two seats only. |
@@ -264,8 +280,10 @@ agent/
   client.py         remote agent that plays using only the API
 api/
   schemas.py        Pydantic models: the JSON contract
-  server.py         FastAPI endpoints, online seats, /ws live feed, serves the UI
+  games.py          Game and GameStore: moves, online seats, dice and live feeds
+  server.py         FastAPI endpoints, guest policy, /ws live feed, serves the UI
   fairness.py       jointly seeded dice for online games, and verifying them
+  links.py          the ?game= / ?join= / #seat= link formats
 desktop/
   app.py            native window, in-process server, hosting and joining, Game menu
   tunnel.py         internet links: Cloudflare quick tunnels to the hosting listener
@@ -282,6 +300,8 @@ ui/src/
   desktop.ts        the desktop app bridge
   storage.ts        per-browser state
   moves.ts          clicks -> move notation, driven by the legal-move list
+  turns.ts          who moves next, and what the page waits for
+  links.ts          the link formats, mirrored from api/links.py
 scripts/            bump_version.py, release_notes.py
 tests/              one file per area, e.g. test_entanglement.py, test_api.py, test_desktop.py
 docs/               this guide, the API reference, README screenshots
@@ -294,7 +314,8 @@ docs/               this guide, the API reference, README screenshots
 1. Add a frozen dataclass for it in `engine/moves.py` with `squares` and `notation()`, add it
    to the `QuantumMove` union and to `parse_move`, and write a function returning its gates.
    Gates must conserve occupancy, like the iSWAP family.
-2. Handle it in `QuantumBoard`: `validate`, `legal_moves`, and a `_<move>` method dispatched
+2. Handle it in `QuantumBoard`: a `_<move>_targets` generator that both `validate` and
+   `legal_moves` use, and a `_<move>` method dispatched
    from `do_move`.
 3. Test it in the engine first. `tests/test_superposition.py` and
    `tests/test_entanglement.py` show how to check probabilities and collapses.
@@ -305,9 +326,11 @@ docs/               this guide, the API reference, README screenshots
 
 1. Add request and response models to `api/schemas.py`, with length limits on every string.
 2. Add the route in `create_app()` in `api/server.py`. Look games up with
-   `store.get(game_id, is_guest(http))`, and hold `game.lock` while touching the board.
-3. If guests shouldn't call it (it creates games or costs CPU), add its path to
-   `HOST_ONLY_PATHS` in `desktop/app.py`.
+   `store.get(game_id, is_guest(http))` and call a `Game` method. If the endpoint needs a new
+   rule or touches the board, add that method to `Game` in `api/games.py`: it holds the lock,
+   and raises a `GameError` subclass for anything the client got wrong.
+3. If guests shouldn't call it (it creates games or costs CPU), give the route
+   `dependencies=[Depends(host_only)]`.
 4. Mirror the types in `ui/src/types.ts` and add a call in `ui/src/api.ts`. Document it in
    [api.md](api.md). Test it in `tests/test_api.py`, plus `tests/test_desktop.py` if guests are
    involved.

@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { LogEntry } from "../components/MoveLog";
+import { gameAddress } from "../links";
 import { type ParsedMove, parseMove } from "../moves";
 import { storage } from "../storage";
+import { isOver } from "../turns";
 import type { Correlations, GameState, LiveMessage, MoveResponse, Seat } from "../types";
 
-export const isOver = (state: GameState) => !!state.winner || !!state.draw_reason;
 // Errors from fetch are Errors; errors from the desktop bridge are plain { message } objects.
 export const message = (e: unknown) =>
   String(e && typeof e === "object" && "message" in e ? (e as { message: unknown }).message : e);
 
 /** Keep the address bar pointing at an online game, so a reload reopens it. */
-export function setUrlGame(gameId: string | null) {
-  window.history.replaceState(null, "", gameId ? `?game=${encodeURIComponent(gameId)}` : window.location.pathname);
+function setUrlGame(gameId: string | null) {
+  window.history.replaceState(null, "", gameAddress(gameId, window.location.pathname));
 }
 
 export function entriesFromHistory(state: GameState): LogEntry[] {
@@ -29,9 +30,17 @@ export function entriesFromHistory(state: GameState): LogEntry[] {
 
 export type Game = ReturnType<typeof useGame>;
 
+export interface OpenOptions {
+  /** This browser's seat in the (online) game, when it has just been claimed. Otherwise the
+   * seat remembered for the game, if any, is used. */
+  seat?: Seat | null;
+  /** Remember the game, so a reload resumes it. False for tutorial games. */
+  remember?: boolean;
+}
+
 /**
  * The game on screen: its state, move log, legal moves and selection, plus the plumbing the
- * other hooks share (`run` for busy/error handling, `showGame` and `applyResponse`).
+ * other hooks share (`run` for busy/error handling, `open` and `applyResponse`).
  */
 export function useGame() {
   const [state, setState] = useState<GameState | null>(null);
@@ -53,15 +62,22 @@ export function useGame() {
   const gameId = state?.game_id;
   const online = !!state?.seats;
 
-  const showGame = useCallback((s: GameState, entries: LogEntry[]) => {
-    const held = s.seats ? storage.seat(s.game_id) : null;
+  /** Put a game on screen, however it was started, resumed or joined. Storage only remembers
+   * things for the next visit; nothing is read back from it that was passed in here, so the
+   * game works the same when storage is unavailable. */
+  const open = useCallback((s: GameState, { seat: claimed, remember = true }: OpenOptions = {}) => {
+    const held = s.seats ? (claimed ?? storage.seat(s.game_id)) : null;
+    if (s.seats && claimed) storage.setSeat(s.game_id, claimed);
+    if (remember) storage.setGameId(s.game_id);
+    setUrlGame(s.seats ? s.game_id : null);
     plies.current = s.history.length;
     setState(s);
-    setLog(entries);
+    setLog(entriesFromHistory(s));
     setPicked([]);
     setCorrelations(null);
     setSeat(held);
-    if (held) setFlipped(held.color === "black");
+    setNotice(null);
+    setFlipped(held?.color === "black");
   }, []);
 
   const run = useCallback(async (task: () => Promise<void>) => {
@@ -76,31 +92,21 @@ export function useGame() {
     }
   }, []);
 
-  const newGame = useCallback(
-    () =>
-      run(async () => {
-        const fresh = await api.init();
-        storage.setGameId(fresh.game_id);
-        setUrlGame(null);
-        setNotice(null);
-        setFlipped(false);
-        showGame(fresh, []);
-      }),
-    [run, showGame],
-  );
+  const newGame = useCallback(() => run(async () => open(await api.init())), [run, open]);
 
+  /** Reopen game `id`, or start a new one if the server no longer has it. */
   const resume = useCallback(
-    async (id: string) => {
-      try {
-        const s = await api.state(id);
-        storage.setGameId(id);
-        setUrlGame(s.seats ? id : null);
-        showGame(s, entriesFromHistory(s));
-      } catch {
-        await newGame();
-      }
-    },
-    [newGame, showGame],
+    (id: string, seat?: Seat | null) =>
+      run(async () => {
+        let s: GameState;
+        try {
+          s = await api.state(id);
+        } catch {
+          s = await api.init();
+        }
+        open(s, { seat });
+      }),
+    [run, open],
   );
 
   useEffect(() => {
@@ -195,7 +201,7 @@ export function useGame() {
     correlations,
     seat,
     run,
-    showGame,
+    open,
     newGame,
     resume,
     applyResponse,

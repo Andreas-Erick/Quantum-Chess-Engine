@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Desktop } from "../desktop";
+import { inviteLink } from "../links";
 import type { Color, GameState, Seat } from "../types";
 
 interface OnlineCardProps {
@@ -19,11 +20,6 @@ interface OnlineCardProps {
 }
 
 const LOCAL_HOSTS = ["localhost", "127.0.0.1", "[::1]"];
-
-export function inviteLink(gameId: string, base?: string | null): string {
-  const root = base ? `${base.replace(/\/$/, "")}/` : `${window.location.origin}${window.location.pathname}`;
-  return `${root}?join=${encodeURIComponent(gameId)}`;
-}
 
 const short = (hex: string) => `${hex.slice(0, 10)}…`;
 
@@ -125,7 +121,7 @@ export function OnlineCard({
     );
   }
 
-  const link = inviteLink(state.game_id, desktop?.publicUrl ?? desktop?.lanUrl);
+  const link = inviteLink(state.game_id, desktop?.publicUrl ?? desktop?.lanUrl, window.location);
   const opponentHere = state.seats.white && state.seats.black;
   const over = !!state.winner || !!state.draw_reason;
   const fairness = state.fairness;

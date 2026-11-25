@@ -30,9 +30,10 @@ import secrets
 import sys
 from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
-from engine.board import IllegalMoveError, QuantumBoard
+from api.links import game_id_from_link
+from engine.board import QuantumBoard, ReplayError
 
 
 def new_secret() -> str:
@@ -87,18 +88,11 @@ def verify(state: dict, my_seed: Optional[str] = None) -> Verdict:
         return Verdict(False, "The server used a different seed from the one you sent.")
 
     dice = SeededDice(secret, guest_seed)
-    board = QuantumBoard(state["initial_fen"], rng=dice)
-    for ply, entry in enumerate(state["history"], start=1):
-        try:
-            result = board.do_move(entry["notation"])
-        except (IllegalMoveError, ValueError) as exc:
-            return Verdict(False, f"Move {ply} ({entry['notation']}) does not replay: {exc}")
-        if result.outcomes != entry["outcomes"] or result.executed != entry["executed"]:
-            return Verdict(
-                False,
-                f"Move {ply} ({entry['notation']}): the dice say {result.outcomes}, "
-                f"but the game recorded {entry['outcomes']}.",
-            )
+    records = [(h["notation"], h["outcomes"], h["executed"]) for h in state["history"]]
+    try:
+        QuantumBoard.replay(state["initial_fen"], records, dice, check_dice=True)
+    except ReplayError as exc:
+        return Verdict(False, f"Move {exc.ply} ({exc.notation}): {exc.reason}")
     rolls = dice.rolls
     if my_seed is None:
         return Verdict(
@@ -117,7 +111,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--seed", help="the seed you sent when joining (shown in the game)")
     args = parser.parse_args(argv)
     parts = urlsplit(args.link)
-    game_id = (parse_qs(parts.query).get("game") or parse_qs(parts.query).get("join") or [None])[0]
+    game_id = game_id_from_link(args.link)
     if not game_id:
         sys.exit("The link has no ?game=<id>.")
     state = httpx.get(

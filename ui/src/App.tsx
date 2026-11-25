@@ -5,10 +5,11 @@ import { MoveLog } from "./components/MoveLog";
 import { OnlineCard } from "./components/OnlineCard";
 import { TutorialCard } from "./components/TutorialCard";
 import { useAi } from "./hooks/useAi";
-import { isOver, useGame } from "./hooks/useGame";
+import { useGame } from "./hooks/useGame";
 import { useOnline } from "./hooks/useOnline";
 import { useTutorial } from "./hooks/useTutorial";
 import { completedMove, type Mode, nextSquares, parseMove } from "./moves";
+import { isOver, mover, type Table, waitingFor } from "./turns";
 import { accepts } from "./tutorial/lessons";
 import type { Color } from "./types";
 
@@ -44,15 +45,8 @@ export default function App() {
     });
   };
 
-  const bothSeated = !!state?.seats && state.seats.white && state.seats.black;
-  const myTurn = !state
-    ? false
-    : game.online
-      ? seat?.color === state.turn && bothSeated
-      : tutorial.progress
-        ? !tutorial.progress.done
-        : state.turn !== ai.playing;
-  const humanTurn = !!state && !isOver(state) && !busy && myTurn;
+  const table: Table = { seat, lesson: tutorial.progress, ai: ai.playing };
+  const humanTurn = !!state && !busy && mover(state, table) === "me";
 
   // In the tutorial, only the moves the lesson asks for can be played.
   const playable = useMemo(() => (step ? legal.filter((m) => accepts(step, m.notation)) : legal), [legal, step]);
@@ -92,10 +86,7 @@ export default function App() {
 
   const lastOwnMove = tutorial.progress?.done ? log[log.length - 1] : undefined;
 
-  let waiting: string | null = null;
-  if (busy && ai.playing === state.turn) waiting = "AI is thinking…";
-  else if (game.online && !bothSeated) waiting = "Waiting for your friend to join…";
-  else if (game.online && seat && seat.color !== state.turn) waiting = `Waiting for ${colorName(state.turn)} to move…`;
+  const waiting = waitingFor(state, table, busy);
 
   return (
     <main className="app">
@@ -268,7 +259,7 @@ export default function App() {
 
         <div className="card log-card">
           <h2>Moves &amp; measurements</h2>
-          <MoveLog entries={log} />
+          <MoveLog entries={log} toMove={state.turn} />
         </div>
 
         <details className="card legend">

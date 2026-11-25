@@ -172,6 +172,42 @@ describe("online play", () => {
     expect(logged).toEqual(["e2e4", "e7e5"]);
   });
 
+  it("keeps the seat when the browser's storage is blocked", async () => {
+    // Private windows and strict settings make every storage access throw.
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    const online = { ...base, game_id: "g4", seats: { white: true, black: false } };
+    const calls = serve((url) => {
+      if (url.startsWith("/init")) return { ...base, game_id: "local" };
+      if (url.startsWith("/levels")) return [];
+      if (url.startsWith("/legal_moves")) return { moves: ["e2e4"] };
+      if (url.startsWith("/online/create")) return { game_id: "g4", color: "white", token: "t4", state: online };
+      if (url.startsWith("/do_move"))
+        return { move: "e2e4", executed: true, captured: null, measurements: [], state: { ...online, turn: "black" } };
+    });
+    try {
+      await renderApp();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Create invite link" }));
+      });
+      FakeSocket.instances.at(-1)!.emit({ type: "state", state: { ...online, seats: { white: true, black: true } } });
+      expect(screen.getByRole("status").textContent).toContain("White to move (you)");
+      await act(async () => {
+        fireEvent.click(square("e2"));
+      });
+      await act(async () => {
+        fireEvent.click(square("e4"));
+      });
+      expect(calls.find((c) => c.url === "/do_move")?.body).toMatchObject({ notation: "e2e4", token: "t4" });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it("joins from an invite link as black, with the board turned around", async () => {
     window.history.replaceState(null, "", "/?join=g2");
     const joined = { ...base, game_id: "g2", seats: { white: true, black: true } };
