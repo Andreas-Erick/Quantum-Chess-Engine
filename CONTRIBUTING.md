@@ -33,7 +33,8 @@ quantum-chess-arena --games 40 --a iterations=400 --b iterations=100   # AI stre
 ## Checks
 
 CI runs these on every pull request, on Python 3.10, 3.12, 3.13 and 3.14, and they must pass
-before merging:
+before merging. `python scripts/check.py` runs them all in order and stops at the first failure
+(`--python` or `--ui` for one half):
 
 ```bash
 ruff check . && ruff format --check .       # lint and formatting (ruff format --write fixes it)
@@ -79,6 +80,12 @@ Pull requests that change the app also build the Windows and macOS installers.
   desktop releases install from `requirements.lock` and `requirements-desktop.lock` (exact
   versions with hashes). After changing a dependency, regenerate both locks with the
   `uv pip compile` commands in their headers.
+
+## Recording a decision
+
+A choice that a newcomer would question, with real alternatives and a cost (a new storage
+layer, a different search, a change to the security model), gets a short record in
+[docs/adr/](docs/adr/) in the same pull request. The [index](docs/adr/README.md) says how.
 
 ## Pull requests
 

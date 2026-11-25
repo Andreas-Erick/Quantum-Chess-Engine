@@ -2,7 +2,8 @@
 
 How Quantum Chess Engine is put together: the layers, what each one owns, how a move travels
 through them, and where to make common changes. For the JSON contract see [api.md](api.md); for
-setup, checks and releasing see [CONTRIBUTING.md](../CONTRIBUTING.md).
+setup, checks and releasing see [CONTRIBUTING.md](../CONTRIBUTING.md); for why the main
+decisions went the way they did, see the [decision records](adr/).
 
 - [Overview](#overview)
 - [Layers and the dependency rule](#layers-and-the-dependency-rule)
@@ -19,19 +20,19 @@ setup, checks and releasing see [CONTRIBUTING.md](../CONTRIBUTING.md).
 ## Overview
 
 ```mermaid
-flowchart LR
-    UI["React + TypeScript UI<br/>browser or desktop window"] -- "JSON + WebSocket" --> API
+flowchart TD
+    UI["React + TypeScript UI<br/>browser or desktop"] -- "JSON + WebSocket" --> API
     Friend["A friend's UI"] -- "JSON + WebSocket" --> API
     Remote["Remote MCTS client"] -- JSON --> API
-    subgraph Server["Server (Docker, or in-process in the desktop app)"]
-        API["FastAPI<br/>api/"] --> Board
-        API --> MCTS["MCTS agent<br/>agent/"]
+    subgraph Server["Server: Docker, or inside the desktop app"]
+        API["FastAPI<br/>api/"] --> MCTS["MCTS agent<br/>agent/"]
         API --> Dice["Fair dice<br/>api/fairness.py"]
-        MCTS --> Board
-        Dice --> Resolver
-        Board["QuantumBoard<br/>rules"] --> Classical["Bitboard move generation"]
+        API --> Board
+        MCTS --> Board["QuantumBoard<br/>rules"]
+        Board --> Classical["Bitboard<br/>move generation"]
         Board --> Register["Sparse register<br/>Cirq state vectors"]
-        Board --> Resolver["Measurement<br/>Born rule, collapse chains"]
+        Board --> Resolver["Measurement<br/>Born rule, collapse"]
+        Dice --> Resolver
     end
 ```
 

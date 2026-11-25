@@ -43,7 +43,7 @@ def host_app():
     port = free_port("127.0.0.1")
     server = start_server("127.0.0.1", port, app)
     yield app, f"http://127.0.0.1:{port}"
-    server.should_exit = True
+    stop_server(server)
 
 
 def make_desktop(app, url, tmp_path, name="joined.json"):
@@ -61,7 +61,7 @@ def test_embedded_server_serves_api_and_ui(tmp_path):
         assert httpx.get(f"{base}/health").json() == {"status": "ok"}
         assert "Quantum Chess" in httpx.get(f"{base}/").text
     finally:
-        server.should_exit = True
+        stop_server(server)
 
 
 def test_options():

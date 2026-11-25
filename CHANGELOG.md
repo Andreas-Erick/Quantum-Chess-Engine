@@ -6,7 +6,16 @@ are taken from its section here (see CONTRIBUTING.md, *Releasing*).
 
 ## [Unreleased]
 
+### Added
+- Architecture decision records in `docs/adr/`: the sparse grouped register, open-loop MCTS,
+  commit–reveal dice and the in-memory game store, each with the options weighed and its cost.
+- `python scripts/check.py` runs every CI check locally, in order, on any platform.
+
 ### Changed
+- The README states the project's goals and non-goals, links the decision records, and its
+  diagram and commands read on a phone. CI cancels superseded runs and caches pip downloads.
+- `start_server` in the desktop app returns a typed `BackgroundServer`, so it needs no
+  `type: ignore`.
 - Move legality has one definition in the engine: `validate` and `legal_moves` ask the same
   per-move generators, and a test checks that a move is valid exactly when it is listed.
   `QuantumBoard.attacks` is public, and the AI's evaluation uses it.

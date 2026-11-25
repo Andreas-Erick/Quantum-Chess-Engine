@@ -37,9 +37,11 @@ play** for seven short interactive lessons.
 <summary>Without Docker</summary>
 
 ```bash
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
-(cd ui && npm ci && npm run build)                      # optional: the UI served at /
+# Optional: build the UI, served at /
+(cd ui && npm ci && npm run build)
 uvicorn api.server:app
 ```
 
@@ -57,14 +59,29 @@ Or run it from source:
 ```bash
 pip install -e ".[desktop]"
 (cd ui && npm ci && npm run build)
-quantum-chess                              # the game in its own window (or: python -m desktop)
-python -m desktop --lan                    # start hosting on your network right away
-python -m desktop --server https://...     # open a hosted server instead of a local one
-pip install --require-hashes -r requirements-desktop.lock   # the exact versions releases use
-pip install -e ".[bundle]"                 # adds PyInstaller, to build the app yourself:
-pyinstaller desktop/quantum_chess.spec     # build dist/QuantumChess
-iscc /DAppVersion=1.2.3 desktop/installer.iss   # then the Windows installer (Inno Setup 6)
-python -m desktop.make_icon                # redraw the icons (needs pillow and fonttools)
+
+# The game in its own window (or: python -m desktop)
+quantum-chess
+# Start hosting on your network right away
+python -m desktop --lan
+# Open a hosted server instead of a local one
+python -m desktop --server https://...
+```
+
+To build the app yourself:
+
+```bash
+# The exact versions releases use
+pip install --require-hashes \
+  -r requirements-desktop.lock
+# Adds PyInstaller
+pip install -e ".[bundle]"
+# Build dist/QuantumChess
+pyinstaller desktop/quantum_chess.spec
+# Then the Windows installer (Inno Setup 6)
+iscc /DAppVersion=1.2.3 desktop/installer.iss
+# Redraw the icons (needs pillow and fonttools)
+python -m desktop.make_icon
 ```
 
 The window is the system web view (Edge WebView2 on Windows, WebKit on macOS), showing the same UI
@@ -143,9 +160,27 @@ server rules out. Details in [`api/fairness.py`](api/fairness.py).
   host a game on the local network or join one. Measurement outcomes come from dice both players
   seed (commit–reveal), so a hosting player can't choose them, and the joiner can replay the
   finished game to check every outcome.
-- **Tested hard where things are random.** 231 Python tests and 17 UI tests: perft-verified move
-  generation, forced and statistical measurement outcomes, A→B→C entanglement chains, and
-  random-play invariant checks. CI runs everything plus a Docker smoke test.
+- **Tested hard where things are random.** Over 270 Python tests and about 30 UI tests:
+  perft-verified move generation, forced and statistical measurement outcomes, A→B→C
+  entanglement chains, and random-play invariant checks. CI runs everything plus a Docker
+  smoke test, and `python scripts/check.py` runs the same checks locally.
+
+## Goals and non-goals
+
+**Goals**
+
+- Real quantum mechanics: unitary moves, the Born rule, and relative phase that matters.
+- Play against the AI or a friend with no account and no server to set up.
+- Fair online play without a trusted server: the dice are verifiable after every game.
+- An engine usable on its own, from a notebook or another program, without the server or UI.
+
+**Non-goals**
+
+- **A strong engine.** The AI is good enough to be a real opponent, not to analyse games.
+- **Scale.** One process holds the games in memory. There is no database, no accounts and no
+  matchmaking ([ADR-0004](docs/adr/0004-in-memory-game-store.md)).
+- **Quantum hardware.** Cirq simulates the state on the CPU; nothing runs on a real device.
+- **Every chess rule in quantum play.** Pawns can't split, and there is no en passant.
 
 ## How to play
 
@@ -215,19 +250,19 @@ games only with people you trust, and report problems privately as described in
 ## How it works
 
 ```mermaid
-flowchart LR
-    UI["React + TypeScript UI<br/>browser or desktop window"] -- "JSON + WebSocket" --> API
+flowchart TD
+    UI["Your UI<br/>browser or desktop"] -- "JSON + WebSocket" --> API
     Friend["A friend's UI"] -- "JSON + WebSocket" --> API
-    Remote["Remote MCTS client"] -- JSON --> API
-    subgraph Server["Server (Docker, or in-process in the desktop app)"]
-        API["FastAPI<br/>api/"] --> Board
-        API --> MCTS["MCTS agent<br/>agent/"]
+    Remote["Remote AI client"] -- JSON --> API
+    subgraph Server["Server: Docker, or inside the desktop app"]
+        API["FastAPI<br/>api/"] --> MCTS["MCTS agent<br/>agent/"]
         API --> Dice["Fair dice<br/>api/fairness.py"]
-        MCTS --> Board
+        API --> Board
+        MCTS --> Board["QuantumBoard<br/>rules"]
+        Board --> Classical["Bitboard<br/>moves"]
+        Board --> Register["Sparse<br/>register"]
+        Board --> Resolver["Measurement"]
         Dice --> Resolver
-        Board["QuantumBoard<br/>rules"] --> Classical["Bitboard move generation"]
-        Board --> Register["Sparse register<br/>Cirq state vectors"]
-        Board --> Resolver["Measurement<br/>Born rule, collapse chains"]
     end
 ```
 
@@ -241,11 +276,26 @@ flowchart LR
 - **UI** (`ui/`) and **desktop app** (`desktop/`): React 19, TypeScript and Vite, in a browser
   or a native window that can host friends.
 
+Layers import only downwards (`engine` ← `agent` ← `api` ← `desktop`), and
+`tests/test_architecture.py` fails if one doesn't.
+
+### Key decisions
+
+Each one is written up with the options weighed and what it costs, in [docs/adr](docs/adr/).
+
+| Decision | Trade-off accepted |
+|---|---|
+| [Simulate only uncertain squares, in independent groups](docs/adr/0001-sparse-grouped-register.md) | More bookkeeping in the register, tested by random-play invariants |
+| [Open-loop MCTS, not minimax](docs/adr/0002-open-loop-mcts.md) | Replays from the root every iteration; misses deep tactics |
+| [Commit–reveal dice, seeded by both players](docs/adr/0003-commit-reveal-dice.md) | A modified host can still peek ahead during a game |
+| [Games in memory, in one process](docs/adr/0004-in-memory-game-store.md) | A restart loses games; no horizontal scaling |
+
 ## Documentation
 
 | | |
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | The layers, the state model, the life of a move, security boundaries, and how to add rules, endpoints, AI levels, lessons and UI features |
+| [docs/adr/](docs/adr/) | Why the big decisions went the way they did, and what they cost |
 | [docs/api.md](docs/api.md) | Endpoints, responses, the live feed, errors, and using the engine from Python |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, running, checks, conventions and releasing |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each release |

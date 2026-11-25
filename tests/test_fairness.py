@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from api.fairness import SeededDice, commitment, main, verify
 from api.server import create_app
-from desktop.app import free_port, start_server
+from desktop.app import free_port, start_server, stop_server
 
 # Black splits a knight across the a-file; White's rook then tries to slide to the king on a8,
 # which measures whether the path is clear. If it is, White captures the king and wins.
@@ -122,4 +122,4 @@ def test_command_line_checks_a_live_server(capsys):
         assert exit_info.value.code == 0
         assert capsys.readouterr().out.startswith("FAIR:")
     finally:
-        server.should_exit = True
+        stop_server(server)
